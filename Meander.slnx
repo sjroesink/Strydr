@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Meander.Core/Meander.Core.csproj" />
+    <Project Path="src/Meander.Infrastructure/Meander.Infrastructure.csproj" />
+    <Project Path="src/Meander.Api/Meander.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Meander.Tests/Meander.Tests.csproj" />
+  </Folder>
+</Solution>

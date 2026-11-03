@@ -1,0 +1,12 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+WORKDIR /app
+COPY global.json Directory.Build.props NuGet.Config ./
+COPY src/Meander.Core/Meander.Core.csproj src/Meander.Core/
+COPY src/Meander.Infrastructure/Meander.Infrastructure.csproj src/Meander.Infrastructure/
+COPY src/Meander.Api/Meander.Api.csproj src/Meander.Api/
+RUN dotnet restore src/Meander.Api/Meander.Api.csproj
+COPY src/ src/
+# Container outputs stay separate from bind-mounted host bin/obj directories.
+ENV DOTNET_USE_POLLING_FILE_WATCHER=1 DOTNET_WATCH_SUPPRESS_LAUNCH_BROWSER=1
+EXPOSE 8080
+CMD ["dotnet", "watch", "--project", "src/Meander.Api/Meander.Api.csproj", "--non-interactive", "run", "--no-launch-profile", "--urls", "http://0.0.0.0:8080"]

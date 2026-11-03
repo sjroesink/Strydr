@@ -1,0 +1,32 @@
+import { expect, test } from '@playwright/test';
+
+test('follows system appearance, persists overrides and omits decorative text', async ({ page }, testInfo) => {
+  await page.route('https://fonts.googleapis.com/**', route => route.abort());
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const darkMap = page.waitForResponse(response => new URL(response.url()).pathname === '/style-dark.json');
+  await page.goto('/');
+  await darkMap;
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('html')).toHaveCSS('background-color', 'rgb(24, 24, 24)');
+  await expect(page.locator('body')).toHaveCSS('color', 'rgb(239, 238, 235)');
+  await expect(page.locator('.brand')).toHaveCSS('color', 'rgb(236, 155, 99)');
+  await expect(page.getByRole('button', { name: 'System theme' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('radio', { name: 'Run' })).toBeChecked();
+  await expect(page.locator('.segmented-control svg')).toHaveCount(2);
+  await expect(page.getByText(/Made for moving|TAKE THE SCENIC WAY|A little further|Good routes start with/)).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: /Avoid out-and-back/ })).toHaveCount(0);
+  await expect(page.locator('.maplibregl-canvas')).toBeVisible();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: testInfo.outputPath('meander-dark.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Light theme' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(page.getByRole('button', { name: 'Light theme' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'System theme' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.screenshot({ path: testInfo.outputPath('meander-light.png'), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});

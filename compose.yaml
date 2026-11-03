@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      AllowedHosts: "localhost;127.0.0.1;api"
+      Ors__ApiKey: ${ORS_API_KEY:?Set ORS_API_KEY in .env}
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ResultStorage__DatabasePath: /app/data/meander.sqlite
+    ports:
+      - "127.0.0.1:5080:8080"
+    volumes:
+      - route-data:/app/data
+      - ./src:/app/src
+      - /app/src/Meander.Api/bin
+      - /app/src/Meander.Api/obj
+      - /app/src/Meander.Core/bin
+      - /app/src/Meander.Core/obj
+      - /app/src/Meander.Infrastructure/bin
+      - /app/src/Meander.Infrastructure/obj
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    environment:
+      VITE_MAPTILER_KEY: ${MAPTILER_KEY:?Set MAPTILER_KEY in .env}
+      API_PROXY_TARGET: http://api:8080
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+volumes:
+  route-data:

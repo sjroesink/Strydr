@@ -1,0 +1,12 @@
+.git
+.cache
+**/node_modules
+**/bin
+**/obj
+**/dist
+**/.env*
+**/appsettings.Local.json
+**/test-results
+**/playwright-report
+**/data
+**/*.sqlite*
