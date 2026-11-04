@@ -34,12 +34,12 @@ public sealed class RouteEditor(ICandidateStore store, GenerationOptions options
     {
         var errors = RequestValidation.Check(request, options);
         if (request.DrawnRouteId is not { } id || store.GetDraft(id) is not { } draft || store.Get(id) is not { } preview)
-            throw new RouteValidationException("This edited route has expired. Refresh its preview before saving.");
-        if (errors.Count > 0) throw new RouteValidationException("Check the route inputs.", errors);
+            throw new RouteValidationException("editExpired", "This edited route has expired. Refresh its preview before saving.");
+        if (errors.Count > 0) throw new RouteValidationException("invalidRequest", "Check the route inputs.", errors);
         if (draft.Activity != request.Activity || draft.Preferences != new RoutePreferences(request.PreferGreen, request.PreferUnpaved) ||
             Geo.DistanceKm(draft.Start.Requested, request.Start!) > .000001 ||
             Geo.DistanceKm(draft.LastPoint.Requested, request.End ?? request.Start!) > .000001)
-            throw new RouteValidationException("The edited route belongs to different settings. Refresh its preview before saving.");
+            throw new RouteValidationException("editMismatch", "The edited route belongs to different settings. Refresh its preview before saving.");
         var range = RouteDistanceRange.For(request, options);
         var outsideRadius = request.RadiusKm is { } radius && preview.MaxDistanceFromStartKm > radius + .000001;
         var status = outsideRadius ? CandidateStatus.Diagnostic : range.Contains(preview.DistanceKm) ? CandidateStatus.Qualified : CandidateStatus.BestEffort;

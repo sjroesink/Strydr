@@ -10,17 +10,17 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
         var errors = RequestValidation.Check(new(request.Start, null, null, .5, request.Activity), options);
         if (request.Points is null || request.Points.Count is < 1 or > 20 || request.Points.Any(p => !Geo.IsValid(p)))
             errors["points"] = ["Choose between 1 and 20 valid route points."];
-        if (errors.Count > 0) throw new RouteValidationException("Check the drawn route points.", errors);
+        if (errors.Count > 0) throw new RouteValidationException("invalidRequest", "Check the drawn route points.", errors);
         Location[] points = [request.Start!, .. request.Points!];
         if (points.Zip(points.Skip(1), Geo.DistanceKm).Any(distance => distance < .001))
-            throw new RouteValidationException("Choose different consecutive route points.");
+            throw new RouteValidationException("duplicatePoints", "Choose different consecutive route points.");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(Math.Min(options.DeadlineSeconds, 20)));
         var snaps = await RetryInvalidPreviewResponse(() => provider.SnapAsync(points, request.Activity, options.SnapRadiusM, deadline.Token), deadline.Token);
         if (snaps.Count != points.Length)
             throw new ProviderException(ProviderFailure.InvalidResponse, "The routing service returned invalid snapping data.");
         if (snaps.Any(s => s is null))
-            throw new RouteValidationException("No walkable path was found near one of the clicked points. Move that point closer to a path.");
+            throw new RouteValidationException("noPathNearPoint", "No walkable path was found near one of the clicked points. Move that point closer to a path.");
         var preferences = new RoutePreferences(request.PreferGreen, request.PreferUnpaved);
         // Every clicked point is intentional. Do not remove its out-and-back legs.
         var route = await RetryInvalidPreviewResponse(() => provider.ViaPointsAsync(new(snaps.Select(s => s!.Location).ToArray(), request.Activity,
@@ -57,7 +57,7 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
     public async Task<IReadOnlyList<RouteCandidate>> GenerateAsync(RouteRequest request, CancellationToken cancellationToken)
     {
         var errors = RequestValidation.Check(request, options);
-        if (errors.Count > 0) throw new RouteValidationException("Check the route inputs.", errors);
+        if (errors.Count > 0) throw new RouteValidationException("invalidRequest", "Check the route inputs.", errors);
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(options.DeadlineSeconds));
@@ -69,11 +69,11 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
         RouteDraft? draft = null;
         if (request.DrawnRouteId is { } draftId)
         {
-            draft = store.GetDraft(draftId) ?? throw new RouteValidationException("The drawn section has expired. Refresh its preview before generating routes.");
+            draft = store.GetDraft(draftId) ?? throw new RouteValidationException("drawnSectionExpired", "The drawn section has expired. Refresh its preview before generating routes.");
             if (draft.Activity != request.Activity || draft.Preferences != preferences || Geo.DistanceKm(draft.Start.Requested, request.Start!) > .000001)
-                throw new RouteValidationException("The drawn section belongs to different settings. Refresh its preview before generating routes.");
+                throw new RouteValidationException("drawnSectionMismatch", "The drawn section belongs to different settings. Refresh its preview before generating routes.");
             if (request.RadiusKm is { } radius && draft.RequestedPoints.Any(p => Geo.DistanceKm(request.Start!, p) > radius))
-                throw new RouteValidationException("A clicked route point is outside the radius. Move the point or increase the radius.");
+                throw new RouteValidationException("pointOutsideRadius", "A clicked route point is outside the radius. Move the point or increase the radius.");
         }
         var fixedDistanceKm = draft?.Route.DistanceKm ?? 0;
         var distanceRange = RouteDistanceRange.For(request, options);
@@ -118,7 +118,7 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
             if (snapped.Count != (isLoop ? 1 : 2))
                 throw new ProviderException(ProviderFailure.InvalidResponse, "The routing service returned invalid snapping data.");
             if (snapped[0] is not { } snappedStart || (isLoop ? snapped[0] : snapped[1]) is not { } snappedEnd)
-                throw new RouteValidationException("No walkable path was found near the selected location. Choose a point closer to a path.");
+                throw new RouteValidationException("noPathNearStart", "No walkable path was found near the selected location. Choose a point closer to a path.");
             start = draft?.Start ?? MakeEndpoint(request.Start!, snappedStart);
             end = isLoop && draft is not null ? start : MakeEndpoint(requestedEnd, snappedEnd);
             var searchStart = draft?.Route.Geometry[^1] ?? start.Snapped;
@@ -200,7 +200,7 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
                     new Dictionary<string, double> { ["meters"] = Math.Round(end.SnapDistanceM) }));
 
             if (draft is not null && completionIsLoop && fixedDistanceKm > (flexibleDistance ? distanceRange.MaxKm : request.TargetDistanceKm) + .000001)
-                throw new RouteValidationException("The drawn section is already longer than the requested route. Increase the distance or remove a point.", minimumDistanceKm: fixedDistanceKm);
+                throw new RouteValidationException("drawnSectionTooLong", "The drawn section is already longer than the requested route. Increase the distance or remove a point.", minimumDistanceKm: fixedDistanceKm);
             if (draft is not null && completionIsLoop) results.Add(draft.Route);
 
             if (draft is not null && completionIsLoop && distanceRange.MaxKm - fixedDistanceKm < .5)
@@ -263,7 +263,8 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
                 if (baseline is not null)
                 {
                     if ((flexibleDistance ? distanceRange.MaxKm : request.TargetDistanceKm) + .000001 < baseline.DistanceKm)
-                        throw new RouteValidationException(draft is null ? "The target is shorter than the shortest route between these locations."
+                        throw new RouteValidationException(draft is null ? "targetTooShort" : "drawnConnectionTooLong",
+                            draft is null ? "The target is shorter than the shortest route between these locations."
                             : "The drawn section plus the shortest connection is longer than the requested route. Increase the distance or remove a point.",
                             minimumDistanceKm: baseline.DistanceKm);
 
@@ -434,8 +435,10 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
     {
         var failure = failures.FirstOrDefault(f => f != ProviderFailure.NoRoute, ProviderFailure.NoRoute);
         if (failure == ProviderFailure.NoRoute)
-            throw new RouteValidationException("No usable route was found. The area may have water, disconnected paths, or a sparse walking network. Try another start or distance." +
-                (avoidBacktracking ? " You can also turn off out-and-back avoidance if no circular paths are available." : ""));
+            throw new RouteValidationException("noUsableRoute",
+                "No usable route was found. The area may have water, disconnected paths, or a sparse walking network. Try another start or distance." +
+                (avoidBacktracking ? " You can also turn off out-and-back avoidance if no circular paths are available." : ""),
+                parameters: new Dictionary<string, double> { ["avoidBacktracking"] = avoidBacktracking ? 1 : 0 });
         throw new ProviderException(failure, failure switch
         {
             ProviderFailure.Timeout => "The routing service timed out. Try again shortly.",

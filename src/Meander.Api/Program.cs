@@ -82,7 +82,7 @@ builder.Services.AddRateLimiter(o =>
     {
         var retry = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var wait) ? Math.Ceiling(wait.TotalSeconds) : 5;
         context.HttpContext.Response.Headers.RetryAfter = Math.Max(1, retry).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        await Results.Problem(statusCode: 429, title: "Too many requests", detail: "Please wait before trying again.")
+        await Results.Problem(statusCode: 429, title: "Too many requests", detail: "Please wait before trying again.", extensions: new Dictionary<string, object?> { ["code"] = "tooManyRequests" })
             .ExecuteAsync(context.HttpContext);
     };
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
@@ -146,7 +146,8 @@ app.UseExceptionHandler();
 app.UseStatusCodePages(async context =>
 {
     var status = context.HttpContext.Response.StatusCode;
-    await Results.Problem(statusCode: status, title: status == 404 ? "Not found" : "Request failed")
+    await Results.Problem(statusCode: status, title: status == 404 ? "Not found" : "Request failed",
+        extensions: new Dictionary<string, object?> { ["code"] = status == 404 ? "notFound" : "requestFailed" })
         .ExecuteAsync(context.HttpContext);
 });
 var hasWebRoot = Directory.Exists(app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot"));
@@ -187,7 +188,8 @@ app.MapGet("/api/searches/{id:guid}", (Guid id, IRouteSearchStore searches, Http
 {
     context.Response.Headers.CacheControl = "no-store";
     return searches.Get(id) is { } search ? Results.Ok(search)
-        : Results.Problem(statusCode: 404, title: "Saved routes not found", detail: "This saved search is unavailable. Check the link or generate new routes.");
+        : Results.Problem(statusCode: 404, title: "Saved routes not found", detail: "This saved search is unavailable. Check the link or generate new routes.",
+            extensions: new Dictionary<string, object?> { ["code"] = "savedSearchNotFound" });
 });
 app.MapPost("/api/routes/preview", async (RoutePreviewRequest request, RouteGenerator generator, CancellationToken ct) =>
     Results.Ok(await generator.PreviewAsync(request, ct))).RequireRateLimiting("preview");
@@ -197,7 +199,8 @@ app.MapPost("/api/routes/{id:guid}/edit", (Guid id, IRouteSearchStore searches, 
     var candidate = searches.GetCandidate(id);
     var source = candidate?.SearchId is { } searchId ? searches.Get(searchId) : null;
     return candidate is not null && source is not null ? Results.Ok(editor.Begin(candidate, source.Request))
-        : Results.Problem(statusCode: 404, title: "Route not found", detail: "This route is unavailable. Open a saved route or generate a new one.");
+        : Results.Problem(statusCode: 404, title: "Route not found", detail: "This route is unavailable. Open a saved route or generate a new one.",
+            extensions: new Dictionary<string, object?> { ["code"] = "routeNotFound" });
 }).RequireRateLimiting("preview");
 app.MapPost("/api/routes/save", (RouteRequest request, RouteEditor editor, IRouteSearchStore searches, ICandidateStore cache, HttpContext context) =>
 {
@@ -210,7 +213,8 @@ app.MapGet("/api/geocode", async (string? q, IGeocodingProvider geocoder, Cancel
 {
     var text = q?.Trim() ?? "";
     if (text.Length is < 3 or > 200)
-        return Results.ValidationProblem(new Dictionary<string, string[]> { ["q"] = ["Search must contain 3–200 characters."] });
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["q"] = ["Search must contain 3–200 characters."] },
+            extensions: new Dictionary<string, object?> { ["code"] = "searchQueryLength" });
     return Results.Ok(await geocoder.SearchAsync(text, ct));
 }).RequireRateLimiting("geocode");
 app.MapGet("/api/routes/{id:guid}/gpx", (Guid id, ICandidateStore store, HttpContext context) =>
@@ -218,11 +222,12 @@ app.MapGet("/api/routes/{id:guid}/gpx", (Guid id, ICandidateStore store, HttpCon
     context.Response.Headers.CacheControl = "no-store";
     return store.Get(id) is { } candidate
         ? Results.File(GpxWriter.Write(candidate), "application/gpx+xml", $"meander-{candidate.DistanceKm:F1}km-{id:N}.gpx")
-        : Results.Problem(statusCode: 404, title: "Route export expired or unavailable", detail: "Generate your route again to create a new GPX download.");
+        : Results.Problem(statusCode: 404, title: "Route export expired or unavailable", detail: "Generate your route again to create a new GPX download.",
+            extensions: new Dictionary<string, object?> { ["code"] = "exportExpired" });
 });
 // API misses must remain ProblemDetails even when the production SPA is present.
-app.MapFallback("/api/{**path}", () => Results.Problem(statusCode: 404, title: "API endpoint not found"));
-app.MapFallback("/map/{**path}", () => Results.Problem(statusCode: 404, title: "Map file not found"));
+app.MapFallback("/api/{**path}", () => Results.Problem(statusCode: 404, title: "API endpoint not found", extensions: new Dictionary<string, object?> { ["code"] = "apiNotFound" }));
+app.MapFallback("/map/{**path}", () => Results.Problem(statusCode: 404, title: "Map file not found", extensions: new Dictionary<string, object?> { ["code"] = "mapFileNotFound" }));
 if (hasWebRoot) app.MapFallbackToFile("index.html");
 app.Run();
 
@@ -300,6 +305,15 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
         else logger.LogWarning("Request failed: {Status} {FailureType}, trace {TraceId}", status, exception.GetType().Name, context.TraceIdentifier);
         if (exception is ProviderException { Failure: ProviderFailure.InvalidResponse, InnerException: { } cause } invalid)
             logger.LogWarning(cause, "ORS {ResponseSection} response could not be parsed, trace {TraceId}", invalid.ResponseSection ?? "unknown", context.TraceIdentifier);
+        var code = exception switch
+        {
+            RouteValidationException routeError => routeError.Code,
+            BadHttpRequestException => "malformedRequest",
+            ProviderException provider => provider.Failure.Code(),
+            TimeoutRejectedException or OperationCanceledException => "timeout",
+            HttpRequestException => "unavailable",
+            _ => "serverError"
+        };
         var problem = new ProblemDetails
         {
             Status = status, Title = title,
@@ -309,6 +323,8 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
             Instance = context.Request.Path
         };
         problem.Extensions["traceId"] = context.TraceIdentifier;
+        problem.Extensions["code"] = code;
+        if (exception is RouteValidationException { Params: { } parameters }) problem.Extensions["params"] = parameters;
         if (exception is ProviderException { ResponseSection: { } section }) problem.Extensions["providerStage"] = section;
         if (exception is RouteValidationException validation)
         {

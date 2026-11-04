@@ -98,11 +98,15 @@ public sealed record RouteDistanceRange(double MinKm, double MaxKm)
     }
 }
 
-public sealed class RouteValidationException(string message,
-    IDictionary<string, string[]>? errors = null, double? minimumDistanceKm = null) : Exception(message)
+public sealed class RouteValidationException(string code, string message,
+    IDictionary<string, string[]>? errors = null, double? minimumDistanceKm = null,
+    IReadOnlyDictionary<string, double>? parameters = null) : Exception(message)
 {
+    // Stable code for clients that translate the message.
+    public string Code { get; } = code;
     public IDictionary<string, string[]> Errors { get; } = errors ?? new Dictionary<string, string[]>();
     public double? MinimumDistanceKm { get; } = minimumDistanceKm;
+    public IReadOnlyDictionary<string, double>? Params { get; } = parameters;
 }
 public enum ProviderFailure { Unavailable, Throttled, Timeout, InvalidResponse, NoRoute }
 public sealed class ProviderException(ProviderFailure failure, string message, Exception? inner = null)
@@ -110,6 +114,18 @@ public sealed class ProviderException(ProviderFailure failure, string message, E
 {
     public ProviderFailure Failure { get; } = failure;
     public string? ResponseSection { get; init; }
+}
+
+public static class ProviderFailures
+{
+    public static string Code(this ProviderFailure failure) => failure switch
+    {
+        ProviderFailure.NoRoute => "noRoute",
+        ProviderFailure.Timeout => "timeout",
+        ProviderFailure.Throttled => "throttled",
+        ProviderFailure.InvalidResponse => "invalidResponse",
+        _ => "unavailable"
+    };
 }
 
 public static class RequestValidation

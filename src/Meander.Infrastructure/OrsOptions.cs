@@ -49,5 +49,5 @@ public sealed class ActivityProfiles
         [Activity.Running] = "foot-walking", [Activity.Walking] = "foot-walking"
     };
     public string For(Activity activity) => profiles.TryGetValue(activity, out var profile)
-        ? profile : throw new RouteValidationException("This activity is not supported by the configured provider.");
+        ? profile : throw new RouteValidationException("activityUnsupported", "This activity is not supported by the configured provider.");
 }

@@ -193,6 +193,21 @@ public sealed class ApiTests
         Assert.Contains("expired", problem.GetProperty("detail").GetString());
     }
 
+    [Fact]
+    public async Task ProblemDetailsCarryStableCodes()
+    {
+        await using var app = new ApiFactory(new());
+        using var client = app.CreateClient();
+        var expired = await client.PostAsJsonAsync("/api/routes/generate", new { start = new { latitude = 52.09, longitude = 5.12 }, targetDistanceKm = 5, drawnRouteId = Guid.NewGuid() });
+        Assert.Equal("drawnSectionExpired", (await expired.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        var missing = await client.GetAsync($"/api/searches/{Guid.NewGuid()}");
+        Assert.Equal("savedSearchNotFound", (await missing.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        var shortQuery = await client.GetAsync("/api/geocode?q=ab");
+        Assert.Equal("searchQueryLength", (await shortQuery.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        var unknown = await client.GetAsync("/api/nope");
+        Assert.Equal("apiNotFound", (await unknown.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+    }
+
     [Theory]
     [InlineData(0, 422)]
     [InlineData(10, 200)]
@@ -443,6 +458,7 @@ public sealed class ApiTests
         });
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
         var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("targetTooShort", error.GetProperty("code").GetString());
         Assert.Equal(2, error.GetProperty("minimumDistanceKm").GetDouble());
     }
 
@@ -455,6 +471,8 @@ public sealed class ApiTests
         Assert.Equal(expected, (int)response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType!.MediaType);
         if (upstreamStatus == 429) Assert.NotNull(response.Headers.RetryAfter);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains(problem.GetProperty("code").GetString(), new[] { "unavailable", "timeout", "throttled", "invalidResponse", "noRoute", "noUsableRoute" });
     }
 
     [Fact]
