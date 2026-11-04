@@ -123,7 +123,7 @@ public sealed class GarminTests
     [InlineData("", "application/json")]
     [InlineData("{\"deregistrations\":[null, 5, {\"userId\": 7}]}", "application/json")]
     [InlineData("{\"deregistrations\":\"x\"}", "application/json")]
-    [InlineData("{\"deregistrations\":[{\"userId\":\"garmin-user-1\"}]}", "text/plain")]
+    [InlineData("hello", "text/plain")]
     public async Task MalformedDeregistrationsAlwaysGet200AndChangeNothing(string body, string contentType)
     {
         await using var app = App();
@@ -132,6 +132,18 @@ public sealed class GarminTests
         using var hook = await client.PostAsync("/api/webhooks/garmin/deregistration", new StringContent(body, System.Text.Encoding.UTF8, contentType));
         Assert.Equal(HttpStatusCode.OK, hook.StatusCode);
         Assert.True((await client.GetFromJsonAsync<JsonElement>("/api/connections"))[0].GetProperty("connected").GetBoolean());
+    }
+
+    [Fact]
+    public async Task DeregistrationIsReadRegardlessOfContentType()
+    {
+        await using var app = App();
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Connect(client);
+        using var hook = await client.PostAsync("/api/webhooks/garmin/deregistration",
+            new StringContent("{\"deregistrations\":[{\"userId\":\"garmin-user-1\"}]}", System.Text.Encoding.UTF8, "text/plain"));
+        Assert.Equal(HttpStatusCode.OK, hook.StatusCode);
+        Assert.False((await client.GetFromJsonAsync<JsonElement>("/api/connections"))[0].GetProperty("connected").GetBoolean());
     }
 
     [Fact]

@@ -29,7 +29,7 @@ public static class ConnectionEndpoints
         app.MapPost("/api/webhooks/garmin/deregistration", async (HttpContext context, GarminOptions garmin, IConnectionStore store, ILogger<ConnectionService> logger) =>
         {
             // Whatever arrives, answer 200: a non-200 only makes Garmin retry a notice we cannot act on.
-            if (!garmin.IsConfigured || !context.Request.HasJsonContentType() || context.Request.ContentLength is > MaxWebhookBytes)
+            if (!garmin.IsConfigured || context.Request.ContentLength is > MaxWebhookBytes)
                 return Results.Ok();
             var removed = 0;
             try
