@@ -4,8 +4,9 @@ import { LocationSearch } from './components/LocationSearch';
 import RouteMap, { ROUTE_COLORS, type MapMarkerTarget, type MapPadding } from './components/RouteMap';
 import type { Activity, Location, Place, RouteCandidate, ServiceKind } from './types';
 import { ConnectionsPanel } from './components/ConnectionsPanel';
+import { ExportMenu, SentNotes, type SentViews } from './components/ExportMenu';
 import { readConnectReturn, rememberSendIntent, takeSendIntent } from './connectReturn';
-import { SERVICE_NAMES, useConnections } from './useConnections';
+import { useConnections } from './useConnections';
 import { insertionIndex as findInsertionIndex } from './routeEditing';
 import { Icon } from './components/Icon';
 import { useTheme, type ThemePreference } from './useTheme';
@@ -173,6 +174,7 @@ function Planner() {
   const [exporting, setExporting] = useState<{ id: string; format: 'gpx' | 'fit' } | null>(null);
   const { connections, setConnected, disconnect } = useConnections();
   const [sending, setSending] = useState<string | null>(null);
+  const [sent, setSent] = useState<Record<string, SentViews>>({});
   // Read before the saved-search restore rewrites the URL.
   const [connectReturn, setConnectReturn] = useState(() => readConnectReturn(window.location.search));
   const [restoring, setRestoring] = useState(false);
@@ -583,9 +585,9 @@ function Planner() {
     const controller = new AbortController();
     setSending(candidate.id); setError([]); setNotice(null);
     try {
-      await sendRoute(candidate.id, service, controller.signal);
+      const result = await sendRoute(candidate.id, service, controller.signal);
       setConnected(service, true);
-      setNotice({ key: 'notice.sent', params: { service: SERVICE_NAMES[service] } });
+      setSent(all => ({ ...all, [candidate.id]: { ...all[candidate.id], [service]: result.viewUrl } }));
     } catch (ex) {
       if (ex instanceof ApiError && ex.problem.status === 401) setConnected(service, false);
       setError(failureMessages(ex, 'error.sendFailed', number));
@@ -792,19 +794,14 @@ function Planner() {
                 <button type="button" className="route-action route-action-edit" disabled={editPhase !== 'idle'}
                   onClick={() => void beginEditing(candidate)} aria-label={t('route.editLabel', { n: index + 1 })}>
                   <Icon name="edit" />{t('route.edit')}</button>
-                <button type="button" className="route-action route-action-download" disabled={exporting !== null} onClick={() => void exportRoute(candidate)}>
-                  <Icon name="download" />{exporting?.id === candidate.id && exporting.format === 'gpx' ? t('route.preparing') : t('route.download')}</button>
+                <ExportMenu busy={exporting !== null || sending !== null}
+                  preparing={exporting?.id === candidate.id} sending={sending === candidate.id}
+                  services={candidate.searchId ? connections : []} sent={sent[candidate.id] ?? {}}
+                  onExport={format => void exportRoute(candidate, format)} onSend={service => void sendToService(candidate, service)}
+                  connectHref={service => connectUrl(service, `${savedSearchPath(candidate.searchId!, candidate.id)}&send=${service}`)}
+                  onConnect={service => rememberSendIntent(service, candidate.id)} />
               </div>
-              <div className="route-card-more">
-                <button type="button" className="text-link" disabled={exporting !== null} onClick={() => void exportRoute(candidate, 'fit')}>
-                  <Icon name="download" />{exporting?.id === candidate.id && exporting.format === 'fit' ? t('route.preparing') : t('route.downloadFit')}</button>
-                {candidate.searchId && connections.map(({ service, connected }) => {
-                  const label = <><Icon name="send" />{sending === candidate.id ? t('route.sending') : t('route.sendTo', { service: SERVICE_NAMES[service] })}</>;
-                  return connected
-                    ? <button key={service} type="button" className="text-link" disabled={sending !== null} onClick={() => void sendToService(candidate, service)}>{label}</button>
-                    : <a key={service} className="text-link" onClick={() => rememberSendIntent(service, candidate.id)} href={connectUrl(service, `${savedSearchPath(candidate.searchId!, candidate.id)}&send=${service}`)}>{label}</a>;
-                })}
-              </div>
+              <SentNotes sent={sent[candidate.id] ?? {}} />
             </li>;
           })}</ul>
           {candidates[0].searchId ? <p className="export-note"><Icon name="link" /><a href={savedSearchPath(candidates[0].searchId, selectedId ?? candidates[0].id)}>{t('results.savedLink')}</a></p>

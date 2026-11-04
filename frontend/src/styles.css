@@ -368,7 +368,28 @@ button svg { flex-shrink:0; }
 .route-warnings { margin:0; padding-left:16px; font-size:13px; line-height:1.5; color:var(--warning-ink); }
 .route-warnings li+li { margin-top:4px; }
 .route-card-actions { display:grid; grid-template-columns:1fr 1.4fr; gap:8px; margin-top:auto; }
-.route-card-more { display:flex; flex-wrap:wrap; gap:4px 18px; margin-top:4px; }
+.route-action-download .export-chevron { width:14px; height:14px; margin-left:-2px; transform:rotate(90deg); transition:transform .15s; }
+.route-action-download[aria-expanded="true"] .export-chevron { transform:rotate(-90deg); }
+.export-menu {
+  grid-column:1 / -1; display:flex; flex-direction:column; margin:0; padding:4px; list-style:none;
+  border:1px solid var(--line); border-radius:14px; background:var(--surface);
+}
+.export-menu :is(button, a) {
+  display:flex; align-items:center; gap:12px; width:100%; min-height:48px; padding:8px 12px; border:0; border-radius:10px;
+  background:transparent; color:var(--ink); font:600 15px 'DM Sans',sans-serif; text-align:left; text-decoration:none; cursor:pointer;
+}
+.export-menu :is(button, a):hover, .export-menu :is(button, a):focus-visible { background:var(--surface-green); }
+.export-menu .icon { flex:none; width:18px; height:18px; color:var(--green); }
+.export-menu span { display:flex; flex-direction:column; gap:1px; }
+.export-menu small { font-size:12px; font-weight:500; color:var(--muted); }
+.route-sent {
+  display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; margin:0; padding:10px 12px; border-radius:12px;
+  background:var(--surface-green); color:var(--green); font-size:13px; line-height:1.4;
+}
+.route-sent > .icon { width:16px; height:16px; stroke-width:2.4; }
+.route-sent span { flex:1; min-width:12em; color:var(--ink); }
+.route-sent a { display:inline-flex; align-items:center; gap:4px; color:var(--green); font-weight:600; text-underline-offset:2px; }
+.route-sent a .icon { width:14px; height:14px; }
 .route-action {
   display:flex; align-items:center; justify-content:center; gap:8px; min-height:48px; padding:0 12px; border-radius:14px;
   border:1px solid var(--line); font-size:15px; font-weight:600;
@@ -522,7 +543,7 @@ button svg { flex-shrink:0; }
   .candidate-list { flex-direction:column; overflow:visible; margin:0; padding:0; scroll-snap-type:none; gap:10px; }
   .route-card { flex:none; padding:16px; }
   .route-card:not(.selected) { gap:10px; }
-  .route-card:not(.selected) :is(.route-card-actions, .route-card-more, .route-quality, .route-warnings) { display:none; }
+  .route-card:not(.selected) :is(.route-card-actions, .route-sent, .route-quality, .route-warnings) { display:none; }
   .route-card:not(.selected) .route-stats dd { font-size:16px; }
 }
 @media (min-width:1500px) {

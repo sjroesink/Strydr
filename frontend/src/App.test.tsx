@@ -258,16 +258,31 @@ it('creates a loop, selects and highlights candidates, and downloads GPX', async
   expect(second).toHaveAttribute('aria-pressed', 'true');
   fireEvent.focus(second);
   expect(screen.getByTestId('highlighted')).toHaveTextContent('route-2');
-  await userEvent.click(screen.getAllByRole('button', { name: /Download GPX/ })[1]);
+  await userEvent.click(screen.getAllByRole('button', { name: /^Export/ })[1]);
+  await userEvent.click(screen.getByRole('button', { name: /Download GPX/ }));
   expect(downloadGpx).toHaveBeenCalledWith(expect.objectContaining({ id: 'route-2' }), expect.any(AbortSignal));
+  expect(screen.queryByRole('button', { name: /Download FIT/ })).not.toBeInTheDocument();
 });
 
 it('downloads a FIT course for the chosen route', async () => {
   vi.mocked(generate).mockResolvedValue([candidate(1), candidate(2)]);
   render(<App />); await chooseStart(); await toPreferences(); await search();
   await userEvent.click(await screen.findByRole('button', { name: /Route 2/ }));
-  await userEvent.click(screen.getAllByRole('button', { name: /Download FIT/ })[1]);
+  await userEvent.click(screen.getAllByRole('button', { name: /^Export/ })[1]);
+  await userEvent.click(screen.getByRole('button', { name: /Download FIT/ }));
   expect(downloadFit).toHaveBeenCalledWith(expect.objectContaining({ id: 'route-2' }), expect.any(AbortSignal));
+});
+
+it('closes the export menu with Escape and returns focus to it', async () => {
+  vi.mocked(generate).mockResolvedValue([candidate()]);
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  const trigger = await screen.findByRole('button', { name: /^Export/ });
+  await userEvent.click(trigger);
+  expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await userEvent.keyboard('{Escape}');
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  expect(trigger).toHaveFocus();
+  expect(screen.queryByRole('button', { name: /Download GPX/ })).not.toBeInTheDocument();
 });
 
 it('supports a different end, walking, and a radius', async () => {
@@ -331,7 +346,8 @@ it('explains expired GPX exports', async () => {
   vi.mocked(generate).mockResolvedValue([candidate()]);
   vi.mocked(downloadGpx).mockRejectedValue(new ApiError({ status: 404 }));
   render(<App />); await chooseStart(); await toPreferences(); await search();
-  await userEvent.click(await screen.findByRole('button', { name: /Download GPX/ }));
+  await userEvent.click(await screen.findByRole('button', { name: /^Export/ }));
+  await userEvent.click(screen.getByRole('button', { name: /Download GPX/ }));
   expect(await screen.findByRole('alert')).toHaveTextContent('export has expired');
 });
 
@@ -594,20 +610,29 @@ it('shows translated route warnings in Dutch', async () => {
 
 it('sends a route to a connected Garmin account', async () => {
   vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
-  vi.mocked(sendRoute).mockResolvedValue({ externalId: '1', viewUrl: null });
+  vi.mocked(sendRoute).mockResolvedValue({ externalId: '1', viewUrl: 'https://connect.garmin.com/modern/course/1' });
   vi.mocked(generate).mockResolvedValue(savedSearch().candidates);
   render(<App />); await chooseStart(); await toPreferences(); await search();
-  await userEvent.click((await screen.findAllByRole('button', { name: /Send to Garmin/ }))[0]);
+  await userEvent.click((await screen.findAllByRole('button', { name: /^Export/ }))[0]);
+  await userEvent.click(screen.getByRole('button', { name: /Send to Garmin/ }));
   expect(sendRoute).toHaveBeenCalledWith('route-1', 'garmin', expect.any(AbortSignal));
-  expect(await screen.findByText(/Route sent to Garmin/)).toBeInTheDocument();
+  expect(await screen.findByText(/Sent to Garmin/)).toBeInTheDocument();
+  const view = screen.getByRole('link', { name: /View in Garmin Connect/ });
+  expect(view).toHaveAttribute('href', 'https://connect.garmin.com/modern/course/1');
+  expect(view).toHaveAttribute('target', '_blank');
   expect(screen.getByText('Garmin connected')).toBeInTheDocument();
+  await userEvent.click(screen.getAllByRole('button', { name: /^Export/ })[0]);
+  expect(screen.getAllByRole('link', { name: /View in Garmin Connect/ })).toHaveLength(2);
+  expect(screen.queryByRole('button', { name: /Send to Garmin/ })).not.toBeInTheDocument();
 });
 
 it('links to Garmin when it is not connected yet', async () => {
   vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: false }]);
   vi.mocked(generate).mockResolvedValue(savedSearch().candidates);
   render(<App />); await chooseStart(); await toPreferences(); await search();
-  const link = (await screen.findAllByRole('link', { name: /Send to Garmin/ }))[0];
+  await userEvent.click((await screen.findAllByRole('button', { name: /^Export/ }))[0]);
+  const link = screen.getByRole('link', { name: /Send to Garmin/ });
+  expect(link).toHaveTextContent('Connect your account first');
   expect(link).toHaveAttribute('href', connectUrl('garmin', '/routes/search-1?route=route-1&send=garmin'));
   expect(sendRoute).not.toHaveBeenCalled();
 });
@@ -653,6 +678,7 @@ it('sends the route automatically after returning from Garmin', async () => {
   await waitFor(() => expect(sendRoute).toHaveBeenCalledWith('route-2', 'garmin', expect.any(AbortSignal)));
   expect(sendRoute).toHaveBeenCalledTimes(1);
   expect(window.location.search).toBe('?route=route-2');
+  expect(await screen.findByText(/Sent to Garmin/)).toBeInTheDocument();
 });
 
 it('only connects, without sending, when returning from the connections panel', async () => {
@@ -670,11 +696,11 @@ it('shows the Preparing label on the export button that was clicked', async () =
   let finish: () => void = () => {};
   vi.mocked(downloadFit).mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
   render(<App />); await chooseStart(); await toPreferences(); await search();
-  await userEvent.click(await screen.findByRole('button', { name: /Download FIT/ }));
+  await userEvent.click(await screen.findByRole('button', { name: /^Export/ }));
+  await userEvent.click(screen.getByRole('button', { name: /Download FIT/ }));
   expect(await screen.findByRole('button', { name: /Preparing/ })).toBeDisabled();
-  expect(screen.getByRole('button', { name: /Download GPX/ })).toBeDisabled();
   finish();
-  expect(await screen.findByRole('button', { name: /Download FIT/ })).toBeEnabled();
+  expect(await screen.findByRole('button', { name: /^Export/ })).toBeEnabled();
 });
 
 it('reports a cancelled connection and an expired one', async () => {
@@ -684,7 +710,9 @@ it('reports a cancelled connection and an expired one', async () => {
   vi.mocked(sendRoute).mockRejectedValue(new ApiError({ status: 401, code: 'connectionExpired' }));
   render(<App />);
   expect(await screen.findByRole('alert')).toHaveTextContent('The connection was cancelled');
-  await userEvent.click((await screen.findAllByRole('button', { name: /Send to Garmin/ }))[0]);
+  await userEvent.click((await screen.findAllByRole('button', { name: /^Export/ }))[0]);
+  await userEvent.click(screen.getByRole('button', { name: /Send to Garmin/ }));
   expect(await screen.findByRole('alert')).toHaveTextContent('The connection has expired');
-  expect((await screen.findAllByRole('link', { name: /Send to Garmin/ }))[0]).toBeInTheDocument();
+  await userEvent.click(screen.getAllByRole('button', { name: /^Export/ })[0]);
+  expect(screen.getByRole('link', { name: /Send to Garmin/ })).toBeInTheDocument();
 });

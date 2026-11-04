@@ -3,6 +3,8 @@ import { disconnect as disconnectService, listConnections } from './api';
 import type { ServiceConnectionStatus, ServiceKind } from './types';
 
 export const SERVICE_NAMES: Record<ServiceKind, string> = { garmin: 'Garmin' };
+// Where a sent route can be viewed.
+export const SERVICE_APPS: Record<ServiceKind, string> = { garmin: 'Garmin Connect' };
 
 export function useConnections() {
   const [connections, setConnections] = useState<ServiceConnectionStatus[]>([]);

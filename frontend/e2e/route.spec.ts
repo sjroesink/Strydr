@@ -91,7 +91,8 @@ test('draw a fixed section with map clicks, export it, and complete it into a lo
   for (const candidate of candidates) expect(candidate.geometry.coordinates.slice(0, preview.geometry.coordinates.length)).toEqual(preview.geometry.coordinates);
   await expect(page.getByRole('button', { name: /Route 1/ })).toBeVisible();
   const completedDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: /Download GPX/ }).first().click();
+  await page.getByRole('button', { name: /^Export/ }).first().click();
+  await page.getByRole('button', { name: /Download GPX/ }).click();
   const file = await completedDownload;
   const xml = await readFile((await file.path())!, 'utf8');
   expect(xml).toContain('<trkpt');
@@ -169,6 +170,7 @@ test('choose a start, generate and inspect routes, and export GPX', async ({ pag
   await page.waitForTimeout(750);
   await page.screenshot({ path: testInfo.outputPath('meander.png'), fullPage: true });
   const pending = page.waitForEvent('download');
+  await page.locator('.route-card.selected').getByRole('button', { name: /^Export/ }).click();
   await page.locator('.route-card.selected').getByRole('button', { name: /Download GPX/ }).click();
   const download = await pending;
   expect(download.suggestedFilename()).toMatch(/^meander-.*\.gpx$/);
@@ -238,8 +240,10 @@ test('connect Garmin and send the chosen route', async ({ page, request }) => {
   await page.getByRole('button', { name: /Next: preferences/ }).click();
   await page.getByRole('button', { name: 'Find my routes' }).click();
   await expect(page.getByRole('button', { name: /Route [123]/ })).toHaveCount(3);
+  await page.locator('.route-card.selected').getByRole('button', { name: /^Export/ }).click();
   await page.locator('.route-card.selected').getByRole('link', { name: /Send to Garmin/ }).click();
-  await expect(page.getByRole('status')).toContainText('Route sent to Garmin');
+  await expect(page.locator('.route-card.selected .route-sent')).toContainText('Sent to Garmin');
+  await expect(page.locator('.route-card.selected').getByRole('link', { name: /View in Garmin Connect/ })).toHaveAttribute('target', '_blank');
   await expect(page.getByText('Garmin connected')).toBeVisible();
   expect(page.url()).not.toContain('connected=');
   expect(await courseCount()).toBe(before + 1);
