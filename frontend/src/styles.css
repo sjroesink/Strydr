@@ -532,3 +532,5 @@ button svg { flex-shrink:0; }
 @media (prefers-reduced-motion:reduce) {
   * { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
 }
+
+.connections { display: grid; gap: 4px; margin-top: 6px; }

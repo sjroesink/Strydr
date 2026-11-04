@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import { ApiError, disconnect, downloadFit, downloadGpx, editRoute, generate, listConnections, loadSearch, previewRoute, saveRoute, sendRoute } from './api';
+import { ApiError, connectUrl, disconnect, downloadFit, downloadGpx, editRoute, generate, listConnections, loadSearch, previewRoute, saveRoute, sendRoute } from './api';
 import { candidate } from './test/fixtures';
 import type { Location, SavedRouteSearch } from './types';
 
@@ -590,4 +590,47 @@ it('shows translated route warnings in Dutch', async () => {
   await userEvent.click(screen.getByRole('button', { name: /Volgende: voorkeuren/ }));
   await userEvent.click(screen.getByRole('button', { name: /Vind mijn routes/ }));
   expect(await screen.findByText('Start 40 m verplaatst naar het dichtstbijzijnde pad.')).toBeInTheDocument();
+});
+
+it('sends a route to a connected Garmin account', async () => {
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  vi.mocked(sendRoute).mockResolvedValue({ externalId: '1', viewUrl: null });
+  vi.mocked(generate).mockResolvedValue(savedSearch().candidates);
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  await userEvent.click((await screen.findAllByRole('button', { name: /Send to Garmin/ }))[0]);
+  expect(sendRoute).toHaveBeenCalledWith('route-1', 'garmin', expect.any(AbortSignal));
+  expect(await screen.findByText(/Route sent to Garmin/)).toBeInTheDocument();
+  expect(screen.getByText('Garmin connected')).toBeInTheDocument();
+});
+
+it('links to Garmin when it is not connected yet', async () => {
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: false }]);
+  vi.mocked(generate).mockResolvedValue(savedSearch().candidates);
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  const link = (await screen.findAllByRole('link', { name: /Send to Garmin/ }))[0];
+  expect(link).toHaveAttribute('href', connectUrl('garmin', '/routes/search-1?route=route-1'));
+  expect(sendRoute).not.toHaveBeenCalled();
+});
+
+it('sends the route automatically after returning from Garmin', async () => {
+  window.history.replaceState(null, '', '/routes/search-1?route=route-2&connected=garmin');
+  vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  vi.mocked(sendRoute).mockResolvedValue({ externalId: '1', viewUrl: null });
+  render(<App />);
+  await waitFor(() => expect(sendRoute).toHaveBeenCalledWith('route-2', 'garmin', expect.any(AbortSignal)));
+  expect(sendRoute).toHaveBeenCalledTimes(1);
+  expect(window.location.search).toBe('?route=route-2');
+});
+
+it('reports a cancelled connection and an expired one', async () => {
+  window.history.replaceState(null, '', '/routes/search-1?route=route-1&connectError=garmin');
+  vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  vi.mocked(sendRoute).mockRejectedValue(new ApiError({ status: 401, code: 'connectionExpired' }));
+  render(<App />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('The connection was cancelled');
+  await userEvent.click((await screen.findAllByRole('button', { name: /Send to Garmin/ }))[0]);
+  expect(await screen.findByRole('alert')).toHaveTextContent('The connection has expired');
+  expect((await screen.findAllByRole('link', { name: /Send to Garmin/ }))[0]).toBeInTheDocument();
 });
