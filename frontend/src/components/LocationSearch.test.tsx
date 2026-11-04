@@ -3,14 +3,15 @@ import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { geocode } from '../api';
 import { LocationSearch } from './LocationSearch';
+import { I18nProvider } from '../i18n';
 import type { Place } from '../types';
 
 vi.mock('../api', () => ({ geocode: vi.fn() }));
 const suggestion = { id: 'utrecht', label: 'Utrecht, Netherlands', location: { latitude: 52.09, longitude: 5.12 } };
 function Search() {
   const [text, setText] = useState(''); const [place, setPlace] = useState<Place | null>(null);
-  return <LocationSearch label="Start location" placeholder="Search" value={text} place={place}
-    onTextChange={value => { setText(value); setPlace(null); }} onPick={value => { setPlace(value); setText(value.label); }} />;
+  return <I18nProvider><LocationSearch label="Start location" placeholder="Search" value={text} place={place}
+    onTextChange={value => { setText(value); setPlace(null); }} onPick={value => { setPlace(value); setText(value.label); }} /></I18nProvider>;
 }
 
 beforeEach(() => { vi.mocked(geocode).mockReset(); vi.mocked(geocode).mockResolvedValue([suggestion]); });

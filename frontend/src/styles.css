@@ -88,15 +88,17 @@ button svg { flex-shrink:0; }
 }
 .brand-period { color:#ce764a; }
 :root[data-theme="dark"] .brand-period { color:var(--green); }
-.theme-picker {
+.theme-picker, .language-picker {
   display:flex; gap:2px; padding:3px; border-radius:999px; background:var(--surface); border:1px solid var(--line); box-shadow:var(--shadow);
 }
-.theme-picker button {
+.theme-picker button, .language-picker button {
   display:grid; place-items:center; width:36px; height:36px; padding:0; border:0; border-radius:999px; background:transparent; color:var(--muted);
 }
-.theme-picker button[aria-pressed="true"] { background:var(--surface-green); color:var(--green); }
-.theme-picker button:hover { color:var(--ink); }
+.theme-picker button[aria-pressed="true"], .language-picker button[aria-pressed="true"] { background:var(--surface-green); color:var(--green); }
+.theme-picker button:hover, .language-picker button:hover { color:var(--ink); }
 .theme-picker .icon { width:17px; height:17px; }
+.top-controls { display:flex; gap:8px; align-items:center; }
+.language-picker button { width:auto; min-width:36px; padding:0 8px; font-size:13px; font-weight:650; }
 
 /* Planner sheet: a bottom sheet on phones, a floating panel on wide screens. */
 .planner-sheet {
@@ -494,7 +496,7 @@ button svg { flex-shrink:0; }
 /* Wide screens: a calm floating panel beside the map. */
 @media (min-width:760px) {
   .top-bar { top:16px; left:16px; right:auto; width:400px; padding:16px 18px 0 20px; }
-  .brand, .theme-picker { box-shadow:none; }
+  .brand, .theme-picker, .language-picker { box-shadow:none; }
   .brand { border:0; padding:0; background:transparent; height:auto; font-size:24px; }
   .planner-sheet {
     top:16px; left:16px; bottom:16px; right:auto; width:400px; max-height:none;

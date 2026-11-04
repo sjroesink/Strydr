@@ -15,7 +15,7 @@ export async function checked(response: Response): Promise<Response> {
   if (response.ok) return response;
   let problem: ApiProblem;
   try { problem = await response.json() as ApiProblem; }
-  catch { problem = { title: 'Service unavailable', detail: 'Could not reach Meander. Check that the API is running.' }; }
+  catch { problem = { title: 'Service unavailable', detail: 'Could not reach Meander. Check that the API is running.', code: 'unavailable' }; }
   throw new ApiError({ ...problem, status: response.status }, response.headers.get('Retry-After'));
 }
 export async function generate(request: RouteRequest, signal: AbortSignal): Promise<RouteCandidate[]> {

@@ -10,11 +10,12 @@ import type { ColorScheme } from '../useTheme';
 import { preserveRouteOverlays, themeOverlay } from '../mapTheme';
 import { resolveMapStyle, type MapEnv } from '../mapStyle';
 import { segmentMidpoints } from '../routeEditing';
+import { useI18n, type Language, type MessageKey } from '../i18n';
 
 export const ROUTE_COLORS = ['#d3733c', '#466bc3', '#9363a9'];
 export type MapMarkerTarget = 'start' | 'end' | number;
 type Props = {
-  colorScheme: ColorScheme;
+  colorScheme: ColorScheme; language: Language;
   start: Location | null; end: Location | null; radiusKm: number | null;
   candidates: RouteCandidate[]; selectedId: string | null; highlightedId: string | null;
   drawnPoints: Location[]; preview: RouteCandidate | null;
@@ -59,6 +60,7 @@ export function radiusRing(center: Location, radiusKm: number): number[][] {
 }
 
 export default function RouteMap(props: Props) {
+  const { t } = useI18n();
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const latest = useRef(props);
@@ -70,15 +72,15 @@ export default function RouteMap(props: Props) {
   const ghosts = useRef<maplibregl.Marker[]>([]);
   const [dragging, setDragging] = useState(false);
   const [ready, setReady] = useState(0);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<MessageKey | null>(null);
   const [retry, setRetry] = useState(0);
   // Memoized so a generated PMTiles style keeps its identity and is only swapped on theme changes.
-  const { style: selectedStyle, configured } = useMemo(() => resolveMapStyle(import.meta.env as MapEnv, props.colorScheme), [props.colorScheme]);
+  const { style: selectedStyle, configured } = useMemo(() => resolveMapStyle(import.meta.env as MapEnv, props.colorScheme, props.language), [props.colorScheme, props.language]);
   const appliedStyle = useRef<string | StyleSpecification | null>(null);
 
   useEffect(() => {
     if (!container.current) return;
-    setError(''); setReady(0);
+    setError(null); setReady(0);
     let map: maplibregl.Map;
     try {
       map = new maplibregl.Map({
@@ -88,13 +90,13 @@ export default function RouteMap(props: Props) {
         center: [5.3, 52.1], zoom: 7, attributionControl: { compact: true },
       });
     } catch {
-      setError('This browser could not start the map. Enable WebGL or try another browser. You can still search for places.');
+      setError('map.noWebgl');
       return;
     }
     mapRef.current = map;
     appliedStyle.current = selectedStyle;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-    map.on('error', () => setError('Map tiles could not load. Check your connection and map configuration.'));
+    map.on('error', () => setError('map.tilesFailed'));
     map.on('load', () => {
       map.addSource('radius', { type: 'geojson', data: empty });
       map.addLayer({ id: 'radius-fill', type: 'fill', source: 'radius', paint: { 'fill-color': '#215c45', 'fill-opacity': .06 } });
@@ -157,7 +159,7 @@ export default function RouteMap(props: Props) {
       // Swap the basemap while retaining live overlays and the current camera.
       map.setStyle(selectedStyle, { transformStyle: (previous, next) => preserveRouteOverlays(previous, next, props.colorScheme) });
       appliedStyle.current = selectedStyle;
-    } catch { setError('Map style could not load. Try again.'); }
+    } catch { setError('map.styleFailed'); }
   }, [selectedStyle, props.colorScheme, ready]);
 
   useEffect(() => {
@@ -206,9 +208,6 @@ export default function RouteMap(props: Props) {
         const element = document.createElement('div');
         element.className = typeof target === 'number' ? 'map-via-marker' : `map-marker ${target === 'end' ? 'end-marker' : ''}`;
         element.textContent = typeof target === 'number' ? String(target + 1) : target === 'start' ? 'A' : 'B';
-        const label = typeof target === 'number' ? `Drawn point ${target + 1}` : target === 'start' ? 'Start location' : 'End location';
-        element.setAttribute('aria-label', label);
-        element.title = `${label} · drag to move`;
         let touchPointer = false;
         element.addEventListener('pointerdown', event => { touchPointer = event.pointerType !== 'mouse'; });
         element.addEventListener('click', event => {
@@ -235,6 +234,9 @@ export default function RouteMap(props: Props) {
       // A preview response can arrive during a drag. Keep the marker instance and
       // its live position until the gesture ends instead of replacing it.
       if (draggingMarker.current !== key) marker.setLngLat([point.longitude, point.latitude]);
+      const label = typeof target === 'number' ? t('map.drawnPoint', { n: target + 1 }) : t(target === 'start' ? 'start.label' : 'end.label');
+      const element = marker.getElement();
+      element.setAttribute('aria-label', label); element.title = t('map.dragToMove', { label });
       marker.getElement().classList.toggle('selected-point', typeof target === 'number' && target === props.selectedPoint);
     }
     updateMarker('start', props.start); updateMarker('end', props.end);
@@ -247,7 +249,7 @@ export default function RouteMap(props: Props) {
         latest.current.onMarkerDragChange(false); setDragging(false);
       }
     });
-  }, [props.start, props.end, props.drawnPoints, props.preview, props.selectedPoint, ready]);
+  }, [props.start, props.end, props.drawnPoints, props.preview, props.selectedPoint, ready, t]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -257,8 +259,8 @@ export default function RouteMap(props: Props) {
     ghosts.current = segmentMidpoints(anchors, props.preview.geometry.coordinates).map((point, index) => {
       const element = document.createElement('div');
       element.className = 'map-ghost-marker';
-      element.setAttribute('aria-label', `Add a point between ${index === 0 ? 'start' : `point ${index}`} and ${index === anchors.length - 2 ? 'finish' : `point ${index + 1}`}`);
-      element.title = 'Tap to add a point · drag to place it';
+      element.setAttribute('aria-label', t('map.addBetween', { from: index === 0 ? t('map.fromStart') : t('map.pointN', { n: index }), to: index === anchors.length - 2 ? t('map.toFinish') : t('map.pointN', { n: index + 1 }) }));
+      element.title = t('map.addTitle');
       const ghost = new maplibregl.Marker({ element, draggable: true }).setLngLat([point.longitude, point.latitude]).addTo(map);
       let touchPointer = false;
       element.addEventListener('pointerdown', event => { touchPointer = event.pointerType !== 'mouse'; });
@@ -280,7 +282,7 @@ export default function RouteMap(props: Props) {
       return ghost;
     });
     return () => { ghosts.current.forEach(marker => marker.remove()); ghosts.current = []; };
-  }, [props.editing, props.start, props.end, props.drawnPoints, props.preview, dragging, ready]);
+  }, [props.editing, props.start, props.end, props.drawnPoints, props.preview, dragging, ready, t]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -306,16 +308,16 @@ export default function RouteMap(props: Props) {
     } else if (props.start) mapRef.current.easeTo({ center: [props.start.longitude, props.start.latitude], zoom: 13, duration: 600 });
   }, [props.candidates, props.start, props.preview, props.mode, props.fitRequest, ready]);
 
-  return <section className="map-panel" aria-label="Route map">
+  return <section className="map-panel" aria-label={t('map.label')}>
     <div ref={container} className="map-canvas" data-testid="route-map" />
     {props.mode !== 'browse' && <div className="map-instruction">{props.mode === 'draw'
-      ? props.start ? 'Tap the map to add a point' : 'Tap the map to set your start'
-      : `Tap the map to set your ${props.mode === 'start' ? 'start' : 'finish'}`}</div>}
+      ? props.start ? t('map.tapToAdd') : t('map.tapToStart')
+      : t(props.mode === 'start' ? 'map.tapToStart' : 'map.tapToFinish')}</div>}
     {(!configured || error) && <div className="map-message" role="alert">
-      <strong>{error ? 'Map unavailable' : 'Configure a basemap'}</strong>
-      <p>{error || 'Set VITE_MAPTILER_KEY or VITE_PMTILES_URL in frontend/.env.local and restart Vite to load the map.'}</p>
-      {error && <button type="button" className="text-button" onClick={() => setRetry(n => n + 1)}>Retry map</button>}
+      <strong>{t(error ? 'map.unavailable' : 'map.configure')}</strong>
+      <p>{error ? t(error) : t('map.configureHint')}</p>
+      {error && <button type="button" className="text-button" onClick={() => setRetry(n => n + 1)}>{t('map.retry')}</button>}
     </div>}
-    {props.candidates.some(c => c.status === 'diagnostic') && <div className="map-diagnostic">Dashed routes exceed your radius</div>}
+    {props.candidates.some(c => c.status === 'diagnostic') && <div className="map-diagnostic">{t('map.diagnostic')}</div>}
   </section>;
 }

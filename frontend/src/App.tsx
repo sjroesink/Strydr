@@ -6,6 +6,8 @@ import type { Activity, Location, Place, RouteCandidate } from './types';
 import { insertionIndex as findInsertionIndex } from './routeEditing';
 import { Icon } from './components/Icon';
 import { useTheme, type ThemePreference } from './useTheme';
+import { I18nProvider, useI18n, type Message, type MessageKey } from './i18n';
+import { MessageError, failureMessages, warningMessage } from './apiText';
 
 const MAX_DISTANCE = Number(import.meta.env.VITE_MAX_DISTANCE_KM) || 60;
 const QUICK_DISTANCES = [5, 8, 10, 15, 21.1];
@@ -15,15 +17,14 @@ const hiddenRouteWarningCodes = new Set(['backtrackingRemoved', 'surfaceDataInco
 const savedSearchPath = (id: string, routeId: string) => `/routes/${encodeURIComponent(id)}?route=${encodeURIComponent(routeId)}`;
 const drawingKey = (start: Location, points: Location[], activity: Activity, green: boolean, unpaved: boolean) =>
   JSON.stringify([start, points, activity, green, unpaved]);
-const formatKm = (km: number) => `${Number.isInteger(km) ? km : Number(km.toFixed(1))}`;
 type DrawingSnapshot = {
   start: Place | null; end: Place | null; startText: string; endText: string; drawnPoints: Location[];
   completeDrawing: boolean; preview: RouteCandidate | null; previewKey: string | null;
 };
 // The wizard asks one thing per step. Editing a complete route is its own full-map view.
 type Step = 'start' | 'distance' | 'preferences' | 'routes';
-const QUESTION_STEPS: { step: Step; label: string }[] = [
-  { step: 'start', label: 'Start' }, { step: 'distance', label: 'Distance' }, { step: 'preferences', label: 'Preferences' },
+const QUESTION_STEPS: { step: Step; label: MessageKey }[] = [
+  { step: 'start', label: 'step.start' }, { step: 'distance', label: 'step.distance' }, { step: 'preferences', label: 'step.preferences' },
 ];
 const noPadding: MapPadding = { top: 0, right: 0, bottom: 0, left: 0 };
 
@@ -126,7 +127,8 @@ function useSheetSwipe(collapsed: boolean, setCollapsed: (collapsed: boolean) =>
   return { ref: sheet, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: onTouchEnd };
 }
 
-export default function App() {
+function Planner() {
+  const { t, say, number, language, setLanguage } = useI18n();
   const { preference: themePreference, colorScheme, changePreference } = useTheme();
   const [step, setStep] = useState<Step>('start');
   const [sheetCollapsed, setSheetCollapsed] = useState(false);
@@ -148,7 +150,7 @@ export default function App() {
   const [draft, setDraft] = useState<RouteCandidate | null>(null);
   const [lastGoodDraft, setLastGoodDraft] = useState<RouteCandidate | null>(null);
   const [draftPhase, setDraftPhase] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
-  const [draftError, setDraftError] = useState('');
+  const [draftError, setDraftError] = useState<Message[]>([]);
   const [draftRevision, setDraftRevision] = useState(0);
   const [activity, setActivity] = useState<Activity>('running');
   const [distance, setDistance] = useState('5');
@@ -162,8 +164,8 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [phase, setPhase] = useState<'idle' | 'loading' | 'done'>('idle');
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [error, setError] = useState<Message[]>([]);
+  const [notice, setNotice] = useState<Message | null>(null);
   const [locating, setLocating] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
@@ -225,7 +227,7 @@ export default function App() {
       void loadSearch(id, controller.signal).then(saved => {
         if (controller.signal.aborted || current !== revision.current) return;
         const request = saved.request;
-        if (!request.start || saved.candidates.length === 0) throw new Error('This saved search has no routes.');
+        if (!request.start || saved.candidates.length === 0) throw new MessageError({ key: 'error.savedNoRoutes' });
         const fullPoints = saved.drawnPoints ?? [];
         const points = request.isEditedRoute ? fullPoints.slice(0, -1) : fullPoints;
         reusableDraft.current = saved.drawnPreview ? {
@@ -242,7 +244,7 @@ export default function App() {
         setPreferGreen(!!request.preferGreen); setPreferUnpaved(!!request.preferUnpaved);
         setDrawnPoints(points); setDraft(saved.drawnPreview); setLastGoodDraft(saved.drawnPreview);
         setCompleteDrawing(!!request.isEditedRoute); setIsEditingRoute(false);
-        setDraftPhase(saved.drawnPreview ? 'ready' : 'idle'); setDraftError('');
+        setDraftPhase(saved.drawnPreview ? 'ready' : 'idle'); setDraftError([]);
         setCandidates(saved.candidates);
         const routeId = new URLSearchParams(window.location.search).get('route');
         const selected = saved.candidates.find(route => route.id === routeId) ?? saved.candidates[0];
@@ -251,7 +253,7 @@ export default function App() {
       }).catch((failure: unknown) => {
         if (controller.signal.aborted || current !== revision.current) return;
         setRestoring(false); setPhase('idle'); setDrawnPoints([]); setDraft(null); setStep('start'); setMode('start');
-        setError(failure instanceof Error ? failure.message : 'Could not open these saved routes. Please try again.');
+        setError(failureMessages(failure, 'error.openSaved', number));
       });
     }
     if (window.location.pathname.startsWith('/routes/')) openSavedSearch();
@@ -264,10 +266,10 @@ export default function App() {
 
   useEffect(() => {
     if (restoring) return;
-    setDraft(null); setDraftError('');
+    setDraft(null); setDraftError([]);
     if (!start || drawnPoints.length === 0 && !completeDrawing) { setLastGoodDraft(null); setDraftPhase('idle'); return; }
     if (completeDrawing && !hasEnd && drawnPoints.length === 0) {
-      setDraftPhase('error'); setDraftError('Add a point on the map to shape this loop.'); return;
+      setDraftPhase('error'); setDraftError([{ key: 'error.addLoopPoint' }]); return;
     }
     const points = completeDrawing ? [...drawnPoints, hasEnd && end ? end.location : start.location] : drawnPoints;
     const key = drawingKey(start.location, points, activity, preferGreen, preferUnpaved);
@@ -285,7 +287,7 @@ export default function App() {
         .catch((failure: unknown) => {
           if (!controller.signal.aborted) {
             setDraftPhase('error');
-            setDraftError(failure instanceof Error ? failure.message : 'Could not connect these points. Move a point or try again.');
+            setDraftError(failureMessages(failure, 'error.connectPoints', number));
           }
         });
     }, 500);
@@ -310,21 +312,21 @@ export default function App() {
     generation.current?.abort(); restoration.current?.abort(); exportingController.current?.abort(); setRestoring(false);
     editController.current?.abort(); setEditPhase('idle'); setSelectedPoint(null);
     setPhase('idle'); setCandidates([]); setSelectedId(null); setHighlightedId(null);
-    setError(''); setNotice(''); setLocating(false); setExporting(null);
+    setError([]); setNotice(null); setLocating(false); setExporting(null);
   }
   function goTo(next: Step) {
-    setError(''); setSheetCollapsed(false); setStep(next);
+    setError([]); setSheetCollapsed(false); setStep(next);
     setMode(current => next === 'start' && !start ? 'start' : current === 'start' || current === 'end' || next !== 'preferences' && current === 'draw' ? 'browse' : current);
     setTimeout(() => (next === 'routes' ? resultsHeading : stepHeading).current?.focus({ preventScroll: true }), 0);
   }
   function next() {
     if (view === 'start') {
-      if (!start) { setError('Choose a start location from search or the map.'); return; }
+      if (!start) { setError([{ key: 'error.chooseStart' }]); return; }
       goTo('distance');
     } else if (view === 'distance') {
       const km = Number(distance);
-      if (!Number.isFinite(km) || km < .5 || km > MAX_DISTANCE) { setError(`Choose a distance between 0.5 and ${MAX_DISTANCE} km.`); return; }
-      if (hasRadius && (!Number.isFinite(Number(radius)) || Number(radius) <= 0)) { setError('Choose a positive radius.'); return; }
+      if (!Number.isFinite(km) || km < .5 || km > MAX_DISTANCE) { setError([{ key: 'error.distanceRange', params: { min: number(.5), max: number(MAX_DISTANCE) } }]); return; }
+      if (hasRadius && (!Number.isFinite(Number(radius)) || Number(radius) <= 0)) { setError([{ key: 'error.radius' }]); return; }
       goTo('preferences');
     }
   }
@@ -360,7 +362,7 @@ export default function App() {
     if (completeDrawing) setMode('browse');
   }
   function insertPoint(index: number, location: Location) {
-    if (drawnPoints.length >= (completeDrawing ? 19 : 20)) { setError('This route has enough control points. Remove a point before adding another.'); return; }
+    if (drawnPoints.length >= (completeDrawing ? 19 : 20)) { setError([{ key: 'error.tooManyPoints' }]); return; }
     rememberDrawing(); invalidate(); setDraft(null);
     setDrawnPoints(points => [...points.slice(0, index), location, ...points.slice(index)]);
     setSelectedPoint(index); if (completeDrawing) setIsEditingRoute(true);
@@ -423,34 +425,33 @@ export default function App() {
   function locate() {
     resetDrawingHistory();
     invalidate();
-    if (!navigator.geolocation) { setError('Your browser does not support location. Search for a place or choose one on the map.'); return; }
+    if (!navigator.geolocation) { setError([{ key: 'error.noGeolocation' }]); return; }
     setLocating(true);
     const current = geoRevision.current;
     navigator.geolocation.getCurrentPosition(position => {
       if (current !== geoRevision.current) return;
       const location = { latitude: position.coords.latitude, longitude: position.coords.longitude };
-      setStart({ label: 'Current location', location }); setStartText('Current location'); setLocating(false);
+      const label = t('start.currentLocation'); setStart({ label, location }); setStartText(label); setLocating(false);
       setMode('browse');
     }, failure => {
       if (current !== geoRevision.current) return;
       setLocating(false);
-      setError(failure.code === 1 ? 'Location permission was denied. Search for a place or choose one on the map.'
-        : 'Your location is unavailable. Search for a place or choose one on the map.');
+      setError([{ key: failure.code === 1 ? 'error.locationDenied' : 'error.locationUnavailable' }]);
     }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
     // Enter on an earlier question moves on instead of searching.
     if (view === 'start' || view === 'distance') { next(); return; }
-    setError(''); setNotice('');
+    setError([]); setNotice(null);
     if (isEditingRoute) { await saveEditedRoute(); return; }
-    if (!start) { setError('Choose a start location from search or the map.'); return; }
-    if (hasEnd && !end) { setError('Choose an end location, or switch back to a loop.'); return; }
-    if (drawnPoints.length > 0 && (!draft || draftPhase !== 'ready')) { setError('Wait for the drawn section to connect, or retry its preview.'); return; }
+    if (!start) { setError([{ key: 'error.chooseStart' }]); return; }
+    if (hasEnd && !end) { setError([{ key: 'error.chooseEnd' }]); return; }
+    if (drawnPoints.length > 0 && (!draft || draftPhase !== 'ready')) { setError([{ key: 'error.waitForDrawing' }]); return; }
     const km = Number(distance);
     const radiusKm = hasRadius ? Number(radius) : null;
-    if (!Number.isFinite(km) || km < .5 || km > MAX_DISTANCE) { setError(`Choose a distance between 0.5 and ${MAX_DISTANCE} km.`); return; }
-    if (radiusKm !== null && (!Number.isFinite(radiusKm) || radiusKm <= 0)) { setError('Choose a positive radius.'); return; }
+    if (!Number.isFinite(km) || km < .5 || km > MAX_DISTANCE) { setError([{ key: 'error.distanceRange', params: { min: number(.5), max: number(MAX_DISTANCE) } }]); return; }
+    if (radiusKm !== null && (!Number.isFinite(radiusKm) || radiusKm <= 0)) { setError([{ key: 'error.radius' }]); return; }
     invalidate(); setMode('browse');
     const current = revision.current;
     const controller = new AbortController(); generation.current = controller;
@@ -476,18 +477,15 @@ export default function App() {
     } catch (ex) {
       if (controller.signal.aborted || revision.current !== current) return;
       setPhase('idle');
-      if (ex instanceof ApiError) {
-        const fields = Object.values(ex.problem.errors ?? {}).flat().join(' ');
-        setError(`${ex.message}${fields ? ` ${fields}` : ''}${ex.problem.minimumDistanceKm !== undefined ? ` Minimum distance: ${ex.problem.minimumDistanceKm.toFixed(2)} km.` : ''}${ex.retryAfter ? ` Try again in ${ex.retryAfter} seconds.` : ''}`);
-      } else setError('Could not reach Meander. Check your connection and that the API is running, then try again.');
+      setError(failureMessages(ex, 'error.unreachable', number));
     }
   }
-  function cancel() { invalidate(); setNotice('Search cancelled.'); }
+  function cancel() { invalidate(); setNotice({ key: 'notice.cancelled' }); }
   async function beginEditing(candidate: RouteCandidate) {
     editController.current?.abort();
     const controller = new AbortController(); editController.current = controller;
     const current = ++revision.current;
-    setEditPhase('opening'); setError('');
+    setEditPhase('opening'); setError([]);
     try {
       const session = await editRoute(candidate.id, controller.signal);
       if (controller.signal.aborted || current !== revision.current) return;
@@ -504,10 +502,10 @@ export default function App() {
       setDrawnPoints(session.points); setCompleteDrawing(true); setIsEditingRoute(true); setMode('browse');
       reusableDraft.current = { candidate: session.preview,
         key: drawingKey(request.start, fullPoints, request.activity, !!request.preferGreen, !!request.preferUnpaved) };
-      setDraft(session.preview); setLastGoodDraft(session.preview); setDraftPhase('ready'); setDraftError('');
+      setDraft(session.preview); setLastGoodDraft(session.preview); setDraftPhase('ready'); setDraftError([]);
     } catch (failure) {
       if (!controller.signal.aborted && current === revision.current) {
-        setEditPhase('idle'); setError(failure instanceof Error ? failure.message : 'Could not open this route for editing.');
+        setEditPhase('idle'); setError(failureMessages(failure, 'error.openEditor', number));
       }
     }
   }
@@ -516,7 +514,7 @@ export default function App() {
     editController.current?.abort();
     const controller = new AbortController(); editController.current = controller;
     const current = revision.current;
-    setEditPhase('saving'); setError('');
+    setEditPhase('saving'); setError([]);
     try {
       const routes = await saveRoute({ start: start.location, end: hasEnd && end ? end.location : null,
         radiusKm: hasRadius ? Number(radius) : null, targetDistanceKm: Number(distance), activity, candidateCount: 1,
@@ -528,11 +526,11 @@ export default function App() {
       const savedDraft = { ...draft, expiresAt: null }; setDraft(savedDraft);
       if (reusableDraft.current?.candidate.id === draft.id) reusableDraft.current = { ...reusableDraft.current, candidate: savedDraft };
       if (routes[0]?.searchId) window.history.pushState(null, '', savedSearchPath(routes[0].searchId, routes[0].id));
-      setNotice('Route saved.');
+      setNotice({ key: 'notice.saved' });
       setTimeout(() => resultsHeading.current?.focus({ preventScroll: true }), 0);
     } catch (failure) {
       if (!controller.signal.aborted && current === revision.current) {
-        setEditPhase('idle'); setError(failure instanceof Error ? failure.message : 'Could not save the edited route.');
+        setEditPhase('idle'); setError(failureMessages(failure, 'error.saveEdited', number));
       }
     }
   }
@@ -567,12 +565,11 @@ export default function App() {
   async function exportRoute(candidate: RouteCandidate) {
     exportingController.current?.abort();
     const controller = new AbortController(); exportingController.current = controller;
-    setExporting(candidate.id); setError('');
+    setExporting(candidate.id); setError([]);
     try { await downloadGpx(candidate, controller.signal); }
     catch (ex) {
       if (!controller.signal.aborted) setError(ex instanceof ApiError && ex.problem.status === 404
-        ? 'This route export has expired. Generate your routes again to download a new GPX file.'
-        : ex instanceof Error ? ex.message : 'The export failed. Please try again.');
+        ? [{ key: 'errors.exportExpired' }] : failureMessages(ex, 'error.exportFailed', number));
     } finally { if (!controller.signal.aborted) setExporting(null); }
   }
 
@@ -580,46 +577,46 @@ export default function App() {
   const distanceValid = Number.isFinite(km) && km >= .5 && km <= MAX_DISTANCE;
   const margin = Number(distanceMargin) / 100;
   const distanceWindow = distanceValid
-    ? `${Math.max(.5, km * (1 - margin)).toFixed(2)} and ${Math.min(MAX_DISTANCE, km * (1 + margin)).toFixed(2)} km` : '';
+    ? t('distance.window', { min: number(Math.max(.5, km * (1 - margin)), 2), max: number(Math.min(MAX_DISTANCE, km * (1 + margin)), 2) }) : '';
   const sliderFill = `${(Math.max(.5, Math.min(MAX_DISTANCE, km || .5)) - .5) / (MAX_DISTANCE - .5) * 100}%`;
   const questionIndex = QUESTION_STEPS.findIndex(item => item.step === view);
-  const preferenceSummary = [preferGreen && 'green', preferUnpaved && 'unpaved', hasEnd && 'one-way', drawnPoints.length > 0 && !completeDrawing && 'drawn section']
-    .filter(Boolean).join(', ') || 'No preferences';
+  const preferenceSummary = [preferGreen && t('summary.green'), preferUnpaved && t('summary.unpaved'), hasEnd && t('summary.oneWay'),
+    drawnPoints.length > 0 && !completeDrawing && t('summary.drawn')].filter(Boolean).join(', ') || t('summary.none');
   const closestId = candidates.length > 1 && distanceValid
     ? candidates.reduce((best, route) => Math.abs(route.distanceKm - km) < Math.abs(best.distanceKm - km) ? route : best).id : null;
   const alerts = <>
-    {error && <div className="error-message" role="alert"><p>{error}</p></div>}
-    {notice && <p role="status" className="notice">{notice}</p>}
+    {error.length > 0 && <div className="error-message" role="alert"><p>{say(error)}</p></div>}
+    {notice && <p role="status" className="notice">{say(notice)}</p>}
   </>;
 
   // A complete edited route is the result itself, so it has no separate section.
-  const drawingSection = (drawnPoints.length > 0 || mode === 'draw') && !(view === 'routes' && completeDrawing) && <section className="drawing-controls" aria-label="Drawn route section" ref={drawingRef}>
-    <div className="drawing-heading"><strong>{drawnPoints.length} point{drawnPoints.length === 1 ? '' : 's'}</strong>
-      {draft && <span>{draft.distanceKm.toFixed(2)} km{completeDrawing ? '' : ' drawn'}</span>}</div>
-    {draftPhase === 'loading' && <p role="status">Connecting points along paths…</p>}
-    {draftError && <p className="field-error" role="alert">{draftError}{lastGoodDraft && ' The last valid route is still shown. Undo or move a point to try again.'}</p>}
+  const drawingSection = (drawnPoints.length > 0 || mode === 'draw') && !(view === 'routes' && completeDrawing) && <section className="drawing-controls" aria-label={t('drawing.section')} ref={drawingRef}>
+    <div className="drawing-heading"><strong>{t('drawing.points', { count: drawnPoints.length })}</strong>
+      {draft && <span>{t(completeDrawing ? 'drawing.km' : 'drawing.drawnKm', { km: number(draft.distanceKm, 2) })}</span>}</div>
+    {draftPhase === 'loading' && <p role="status">{t('drawing.connecting')}</p>}
+    {draftError.length > 0 && <p className="field-error" role="alert">{say(draftError)}{lastGoodDraft && ` ${t('drawing.lastValid')}`}</p>}
     {view !== 'routes' && <div className="drawing-actions">
       <button type="button" className="chip-button" disabled={!hasDrawingHistory && drawnPoints.length === 0}
-        title="Undo last change (Ctrl+Z)" aria-keyshortcuts="Control+Z Meta+Z" onClick={undoDrawnPoint}><Icon name="undo" />Undo</button>
+        title={t('drawing.undoTitle')} aria-keyshortcuts="Control+Z Meta+Z" onClick={undoDrawnPoint}><Icon name="undo" />{t('drawing.undo')}</button>
       {selectedPoint !== null && drawnPoints[selectedPoint] && <button type="button" className="chip-button"
-        aria-keyshortcuts="Delete" onClick={() => removePoint(selectedPoint)}><Icon name="trash" />Remove point {selectedPoint + 1}</button>}
-      <button type="button" className="chip-button" disabled={drawnPoints.length === 0} onClick={clearDrawing}>Clear drawing</button>
-      {drawnPoints.length > 0 && <button type="button" className="chip-button" onClick={refreshDrawing}>Refresh drawing</button>}
+        aria-keyshortcuts="Delete" onClick={() => removePoint(selectedPoint)}><Icon name="trash" />{t('drawing.removePoint', { n: selectedPoint + 1 })}</button>}
+      <button type="button" className="chip-button" disabled={drawnPoints.length === 0} onClick={clearDrawing}>{t('drawing.clear')}</button>
+      {drawnPoints.length > 0 && <button type="button" className="chip-button" onClick={refreshDrawing}>{t('drawing.refresh')}</button>}
     </div>}
     {draft && <button type="button" className="text-link drawn-download" disabled={exporting !== null}
-      onClick={() => void exportRoute(draft)}><Icon name="download" />{completeDrawing ? 'Download edited GPX' : 'Download drawn GPX'}</button>}
+      onClick={() => void exportRoute(draft)}><Icon name="download" />{completeDrawing ? t('drawing.downloadEdited') : t('drawing.downloadDrawn')}</button>}
     {draft && draft.warnings.filter(showRouteWarning).length > 0 && <ul className="route-warnings">
-      {draft.warnings.filter(showRouteWarning).map(warning => <li key={warning.code}>{warning.message}</li>)}
+      {draft.warnings.filter(showRouteWarning).map(warning => <li key={warning.code}>{say(warningMessage(warning, number))}</li>)}
     </ul>}
   </section>;
 
   function stepHeader(title: ReactNode, subtitle?: string) {
     return <div className="step-header">
       <div className="step-progress">
-        {questionIndex > 0 && <button type="button" className="round-button" aria-label={`Back to ${QUESTION_STEPS[questionIndex - 1].label.toLowerCase()}`} onClick={back}>
+        {questionIndex > 0 && <button type="button" className="round-button" aria-label={t(questionIndex === 1 ? 'step.back.start' : 'step.back.distance')} onClick={back}>
           <Icon name="back" /></button>}
         <div className="progress-track">
-          <div className="progress-label"><span>Step {questionIndex + 1} of 3</span><span>{QUESTION_STEPS[questionIndex].label}</span></div>
+          <div className="progress-label"><span>{t('step.progress', { current: questionIndex + 1, total: 3 })}</span><span>{t(QUESTION_STEPS[questionIndex].label)}</span></div>
           <div className="progress-bar" aria-hidden="true">{QUESTION_STEPS.map((item, index) =>
             <span key={item.step} className={index <= questionIndex ? 'done' : ''} />)}</div>
         </div>
@@ -631,89 +628,89 @@ export default function App() {
 
   function renderQuestion() {
     if (view === 'start') return <>
-      {stepHeader('Where do you start?')}
-      <fieldset className="activity-picker"><legend className="visually-hidden">Activity</legend>
+      {stepHeader(t('start.title'))}
+      <fieldset className="activity-picker"><legend className="visually-hidden">{t('activity.legend')}</legend>
         <div className="segmented-control">
           {(['running', 'walking'] as const).map(value => <label key={value} className={activity === value ? 'selected' : ''}>
             <input type="radio" name="activity" value={value} checked={activity === value}
               onChange={() => { invalidate(); setActivity(value); }} />
-            <Icon name={value === 'running' ? 'run' : 'walk'} /> {value === 'running' ? 'Run' : 'Walk'}
+            <Icon name={value === 'running' ? 'run' : 'walk'} /> {t(value === 'running' ? 'activity.running' : 'activity.walking')}
           </label>)}
         </div>
       </fieldset>
-      <LocationSearch label="Start location" placeholder="Search a town, park, or address" value={startText} place={start}
+      <LocationSearch label={t('start.label')} placeholder={t('start.placeholder')} value={startText} place={start}
         onTextChange={value => { resetDrawingHistory(); invalidate(); setStart(null); setStartText(value); }} onPick={place => pick('start', place)} />
       <div className="chip-row">
-        <button type="button" className="chip-button" onClick={locate} disabled={locating}><Icon name="locate" />{locating ? 'Finding you…' : 'Use my location'}</button>
+        <button type="button" className="chip-button" onClick={locate} disabled={locating}><Icon name="locate" />{locating ? t('start.locating') : t('start.useLocation')}</button>
         <button type="button" className="chip-button" aria-pressed={mode === 'start'} onClick={() => setMode(current => current === 'start' ? 'browse' : 'start')}>
-          <Icon name="pin" />Pick on map</button>
+          <Icon name="pin" />{t('start.pickOnMap')}</button>
       </div>
     </>;
     if (view === 'distance') return <>
-      {stepHeader(<label htmlFor="distance">How far?</label>)}
+      {stepHeader(<label htmlFor="distance">{t('distance.title')}</label>)}
       <div className="distance-dial">
-        <button type="button" className="round-button large" aria-label="Half a kilometre shorter" onClick={() => nudgeDistance(-.5)}><Icon name="minus" /></button>
+        <button type="button" className="round-button large" aria-label={t('distance.shorter')} onClick={() => nudgeDistance(-.5)}><Icon name="minus" /></button>
         <div className="distance-number"><input id="distance" type="number" min="0.5" max={MAX_DISTANCE} step="0.1" inputMode="decimal"
           value={distance} onChange={e => changeDistance(e.target.value)} /><span>km</span></div>
-        <button type="button" className="round-button large" aria-label="Half a kilometre longer" onClick={() => nudgeDistance(.5)}><Icon name="plus" /></button>
+        <button type="button" className="round-button large" aria-label={t('distance.longer')} onClick={() => nudgeDistance(.5)}><Icon name="plus" /></button>
       </div>
-      <input className="distance-slider" type="range" aria-label="Target distance" min="0.5" max={MAX_DISTANCE} step="0.1"
+      <input className="distance-slider" type="range" aria-label={t('distance.slider')} min="0.5" max={MAX_DISTANCE} step="0.1"
         style={{ '--fill': sliderFill } as React.CSSProperties}
         value={Math.max(.5, Math.min(MAX_DISTANCE, km || .5))} onChange={e => changeDistance(e.target.value)} />
-      <div className="quick-distances" role="group" aria-label="Common distances">
+      <div className="quick-distances" role="group" aria-label={t('distance.common')}>
         {QUICK_DISTANCES.filter(value => value <= MAX_DISTANCE).map(value => <button type="button" key={value}
-          aria-pressed={km === value} aria-label={`${value} km`} onClick={() => changeDistance(String(value))}>{formatKm(value)}</button>)}
+          aria-pressed={km === value} aria-label={t('distance.quick', { km: number(value) })} onClick={() => changeDistance(String(value))}>{number(value)}</button>)}
       </div>
       <div className="option-list">
         <div className="option-row">
-          <label className="toggle-label"><span className="option-text"><span>Flexible distance</span>
-            {hasFlexibleDistance && distanceWindow && <span className="option-detail" aria-live="polite">Between <strong>{distanceWindow}</strong></span>}</span>
+          <label className="toggle-label"><span className="option-text"><span>{t('distance.flexible')}</span>
+            {hasFlexibleDistance && distanceWindow && <span className="option-detail" aria-live="polite">{t('distance.between')} <strong>{distanceWindow}</strong></span>}</span>
             <input type="checkbox" checked={hasFlexibleDistance} onChange={event => { invalidate(); setHasFlexibleDistance(event.target.checked); }} />
             <span className="toggle-track" aria-hidden="true" />
           </label>
-          {hasFlexibleDistance && <div className="option-setting"><label htmlFor="distance-margin">Distance margin</label>
+          {hasFlexibleDistance && <div className="option-setting"><label htmlFor="distance-margin">{t('distance.margin')}</label>
             <select id="distance-margin" value={distanceMargin} onChange={event => { invalidate(); setDistanceMargin(event.target.value); }}>
               {[10, 15, 20, 25, 30].map(value => <option key={value} value={value}>±{value}%</option>)}
             </select>
           </div>}
         </div>
         <div className="option-row">
-          <label className="toggle-label"><span className="option-text"><span>Stay close to home</span></span>
+          <label className="toggle-label"><span className="option-text"><span>{t('distance.stayClose')}</span></span>
             <input type="checkbox" checked={hasRadius} onChange={e => { invalidate(); setHasRadius(e.target.checked); }} />
             <span className="toggle-track" aria-hidden="true" />
           </label>
-          {hasRadius && <div className="option-setting"><label htmlFor="radius">Maximum radius</label><div className="unit-input">
+          {hasRadius && <div className="option-setting"><label htmlFor="radius">{t('distance.maxRadius')}</label><div className="unit-input">
             <input id="radius" type="number" min="0.01" step="0.1" value={radius} inputMode="decimal"
               onChange={e => { invalidate(); setRadius(e.target.value); }} /><span>km</span></div></div>}
         </div>
       </div>
     </>;
     return <>
-      {stepHeader('What do you like?', 'All optional. Skip it if you just want to go.')}
-      <fieldset className="preference-cards"><legend className="visually-hidden">Preferences</legend>
+      {stepHeader(t('preferences.title'), t('preferences.subtitle'))}
+      <fieldset className="preference-cards"><legend className="visually-hidden">{t('step.preferences')}</legend>
         <label className={preferGreen ? 'selected' : ''}>
           <input type="checkbox" checked={preferGreen} onChange={event => { invalidate(); setPreferGreen(event.target.checked); }} />
-          <Icon name="green" /><span>Green surroundings</span><span className="card-check" aria-hidden="true"><Icon name="check" /></span></label>
+          <Icon name="green" /><span>{t('preferences.green')}</span><span className="card-check" aria-hidden="true"><Icon name="check" /></span></label>
         <label className={preferUnpaved ? 'selected' : ''}>
           <input type="checkbox" checked={preferUnpaved} onChange={event => { invalidate(); setPreferUnpaved(event.target.checked); }} />
-          <Icon name="unpaved" /><span>Unpaved paths</span><span className="card-check" aria-hidden="true"><Icon name="check" /></span></label>
+          <Icon name="unpaved" /><span>{t('preferences.unpaved')}</span><span className="card-check" aria-hidden="true"><Icon name="check" /></span></label>
       </fieldset>
       <div className="option-list">
-        <span className="option-heading">Route shape</span>
+        <span className="option-heading">{t('shape.heading')}</span>
         <div className="option-row">
           <button type="button" className="option-button" aria-expanded={hasEnd} onClick={toggleEnd}>
-            <span>Finish somewhere else</span><span className="option-value">{hasEnd ? 'Make it a loop' : 'Same as start'}<Icon name="chevron" /></span></button>
+            <span>{t('shape.finishElsewhere')}</span><span className="option-value">{hasEnd ? t('shape.makeLoop') : t('shape.sameAsStart')}<Icon name="chevron" /></span></button>
           {hasEnd && <div className="end-section">
-            <LocationSearch label="End location" placeholder="Where would you like to finish?" value={endText} place={end}
+            <LocationSearch label={t('end.label')} placeholder={t('end.placeholder')} value={endText} place={end}
               onTextChange={value => { resetDrawingHistory(); invalidate(); setEnd(null); setEndText(value); }} onPick={place => pick('end', place)} />
             <button type="button" className="chip-button" aria-pressed={mode === 'end'} onClick={() => setMode(current => current === 'end' ? 'browse' : 'end')}>
-              <Icon name="pin" />Pick finish on map</button>
+              <Icon name="pin" />{t('end.pickOnMap')}</button>
           </div>}
         </div>
         <div className="option-row">
           <button type="button" className="option-button" aria-pressed={mode === 'draw'}
             onClick={() => setMode(current => current === 'draw' ? 'browse' : 'draw')}>
-            <span>Pass through a spot</span><span className="option-value">{mode === 'draw' ? 'Done drawing' : drawnPoints.length ? 'Edit on map' : 'Draw on map'}<Icon name="chevron" /></span></button>
+            <span>{t('shape.passThrough')}</span><span className="option-value">{mode === 'draw' ? t('shape.doneDrawing') : drawnPoints.length ? t('shape.editOnMap') : t('shape.drawOnMap')}<Icon name="chevron" /></span></button>
           {drawingSection}
         </div>
       </div>
@@ -723,16 +720,16 @@ export default function App() {
   function renderRoutes() {
     return <>
       <div className="step-summary">
-        <button type="button" aria-label="Change start" onClick={() => goTo('start')}>
-          <Icon name="check" /><span><small>Start</small>{activity === 'running' ? 'Run' : 'Walk'} from {start?.label ?? '…'}</span><span className="summary-change">Change</span></button>
-        <button type="button" aria-label="Change distance" onClick={() => goTo('distance')}>
-          <Icon name="check" /><span><small>Distance</small>{formatKm(km || 0)} km{hasFlexibleDistance ? `, ±${distanceMargin}%` : ''}{hasRadius ? `, within ${radius} km` : ''}</span><span className="summary-change">Change</span></button>
-        <button type="button" aria-label="Change preferences" onClick={() => goTo('preferences')}>
-          <Icon name="check" /><span><small>Preferences</small>{preferenceSummary}</span><span className="summary-change">Change</span></button>
+        <button type="button" aria-label={t('summary.changeStart')} onClick={() => goTo('start')}>
+          <Icon name="check" /><span><small>{t('step.start')}</small>{t('summary.start', { activity: t(activity === 'running' ? 'activity.running' : 'activity.walking'), place: start?.label ?? '…' })}</span><span className="summary-change">{t('summary.change')}</span></button>
+        <button type="button" aria-label={t('summary.changeDistance')} onClick={() => goTo('distance')}>
+          <Icon name="check" /><span><small>{t('step.distance')}</small>{t('drawing.km', { km: number(km || 0) })}{hasFlexibleDistance ? t('summary.margin', { margin: distanceMargin }) : ''}{hasRadius ? t('summary.within', { km: radius }) : ''}</span><span className="summary-change">{t('summary.change')}</span></button>
+        <button type="button" aria-label={t('summary.changePreferences')} onClick={() => goTo('preferences')}>
+          <Icon name="check" /><span><small>{t('step.preferences')}</small>{preferenceSummary}</span><span className="summary-change">{t('summary.change')}</span></button>
       </div>
-      <section className="results" aria-label="Route suggestions" aria-busy={phase === 'loading'}>
+      <section className="results" aria-label={t('results.label')} aria-busy={phase === 'loading'}>
         {candidates.length > 0 ? <>
-          <div className="results-heading"><h2 ref={resultsHeading} tabIndex={-1}>{candidates.length === 1 ? 'Your route' : `${candidates.length} routes for you`}</h2>
+          <div className="results-heading"><h2 ref={resultsHeading} tabIndex={-1}>{candidates.length === 1 ? t('results.one') : t('results.many', { count: candidates.length })}</h2>
             {candidates.length > 1 && <div className="carousel-dots" aria-hidden="true">{candidates.map(route =>
               <span key={route.id} className={route.id === selectedId ? 'active' : ''} />)}</div>}</div>
           <ul className="candidate-list" ref={carousel} onScroll={onCarouselScroll}>{candidates.map((candidate, index) => {
@@ -744,41 +741,41 @@ export default function App() {
               onPointerLeave={event => { if (event.pointerType === 'mouse') setHighlightedId(null); }}
               onFocus={() => setHighlightedId(candidate.id)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setHighlightedId(null); }}>
               <button type="button" className="route-select" aria-pressed={selectedId === candidate.id} onClick={() => selectRoute(candidate.id)}>
-                <span className="route-swatch" aria-hidden="true" /><strong>Route {index + 1}</strong>
-                {candidate.id === closestId && <span className="route-badge">Closest to {formatKm(km)} km</span>}
+                <span className="route-swatch" aria-hidden="true" /><strong>{t('route.name', { n: index + 1 })}</strong>
+                {candidate.id === closestId && <span className="route-badge">{t('route.closest', { km: number(km) })}</span>}
               </button>
               <dl className="route-stats">
-                <div><dt>distance</dt><dd>{candidate.distanceKm.toFixed(2)}<small> km</small></dd></div>
-                <div><dt>ascent</dt><dd>{candidate.elevationGainM === null ? <small>Elevation unavailable</small> : <>{Math.round(candidate.elevationGainM)}<small> m</small></>}</dd></div>
+                <div><dt>{t('route.distance')}</dt><dd>{number(candidate.distanceKm, 2)}<small> km</small></dd></div>
+                <div><dt>{t('route.ascent')}</dt><dd>{candidate.elevationGainM === null ? <small>{t('route.noElevation')}</small> : <>{Math.round(candidate.elevationGainM)}<small> m</small></>}</dd></div>
               </dl>
-              {candidate.status !== 'qualified' && <span className="route-status">{candidate.status === 'diagnostic' ? 'Exceeds radius · diagnostic' : 'Outside target distance'}</span>}
+              {candidate.status !== 'qualified' && <span className="route-status">{candidate.status === 'diagnostic' ? t('route.diagnostic') : t('route.outside')}</span>}
               {(candidate.woodlandPercent != null || candidate.unpavedPercent != null) && <div className="route-quality">
-                {candidate.woodlandPercent != null && <span title="Approximate route length inside forest, heath, dunes or nature reserves mapped in OpenStreetMap"><Icon name="green" />{Math.round(candidate.woodlandPercent)}% nature</span>}
-                {candidate.unpavedPercent != null && <span><Icon name="unpaved" />{Math.round(candidate.unpavedPercent)}% confirmed unpaved</span>}
+                {candidate.woodlandPercent != null && <span title={t('route.natureTitle')}><Icon name="green" />{t('route.nature', { percent: Math.round(candidate.woodlandPercent) })}</span>}
+                {candidate.unpavedPercent != null && <span><Icon name="unpaved" />{t('route.unpaved', { percent: Math.round(candidate.unpavedPercent) })}</span>}
               </div>}
-              {warnings.length > 0 && <ul className="route-warnings">{warnings.map(w => <li key={w.code}>{w.message}</li>)}</ul>}
+              {warnings.length > 0 && <ul className="route-warnings">{warnings.map(w => <li key={w.code}>{say(warningMessage(w, number))}</li>)}</ul>}
               <div className="route-card-actions">
                 <button type="button" className="route-action route-action-edit" disabled={editPhase !== 'idle'}
-                  onClick={() => void beginEditing(candidate)} aria-label={`Edit route ${index + 1}`}>
-                  <Icon name="edit" />Edit</button>
+                  onClick={() => void beginEditing(candidate)} aria-label={t('route.editLabel', { n: index + 1 })}>
+                  <Icon name="edit" />{t('route.edit')}</button>
                 <button type="button" className="route-action route-action-download" disabled={exporting !== null} onClick={() => void exportRoute(candidate)}>
-                  <Icon name="download" />{exporting === candidate.id ? 'Preparing…' : 'Download GPX'}</button>
+                  <Icon name="download" />{exporting === candidate.id ? t('route.preparing') : t('route.download')}</button>
               </div>
             </li>;
           })}</ul>
-          {candidates[0].searchId ? <p className="export-note"><Icon name="link" /><a href={savedSearchPath(candidates[0].searchId, selectedId ?? candidates[0].id)}>Saved route link</a></p>
-            : candidates[0].expiresAt && <p className="export-note">GPX downloads available until {new Date(candidates[0].expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.</p>}
-        </> : phase === 'done' ? <div className="empty-state"><h2>No routes found</h2><p>Try another start or adjust your distance and radius.</p></div>
-          : <p className="loading-state" role="status"><span className="spinner" />{restoring ? 'Opening saved routes…' : 'Finding your way…'}</p>}
+          {candidates[0].searchId ? <p className="export-note"><Icon name="link" /><a href={savedSearchPath(candidates[0].searchId, selectedId ?? candidates[0].id)}>{t('results.savedLink')}</a></p>
+            : candidates[0].expiresAt && <p className="export-note">{t('results.downloadsUntil', { time: new Date(candidates[0].expiresAt).toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' }) })}</p>}
+        </> : phase === 'done' ? <div className="empty-state"><h2>{t('results.none')}</h2><p>{t('results.noneHint')}</p></div>
+          : <p className="loading-state" role="status"><span className="spinner" />{restoring ? t('actions.opening') : t('actions.finding')}</p>}
       </section>
       {drawingSection}
-      {editPhase === 'opening' && <p className="notice" role="status">Opening the route editor…</p>}
+      {editPhase === 'opening' && <p className="notice" role="status">{t('actions.openingEditor')}</p>}
       {alerts}
     </>;
   }
 
   const routeMap = <RouteMap start={start?.location ?? null} end={hasEnd ? end?.location ?? null : null}
-    colorScheme={colorScheme}
+    colorScheme={colorScheme} language={language}
     radiusKm={hasRadius && Number(radius) > 0 ? Number(radius) : null} candidates={candidates}
     drawnPoints={drawnPoints} preview={draft} previousPreview={lastGoodDraft}
     selectedId={selectedId} highlightedId={highlightedId} mode={mode}
@@ -787,49 +784,54 @@ export default function App() {
     selectedPoint={selectedPoint} onSelectPoint={setSelectedPoint}
     editing={view === 'edit'} onInsertPoint={insertPoint} padding={padding} fitRequest={fitRequest} />;
 
-  const brand = <a className="brand" href="/" aria-label="Meander home"><PathIcon small /><span>meander<span className="brand-period">.</span></span></a>;
-  const themePicker = <div className="theme-picker" role="group" aria-label="Appearance">
+  const brand = <a className="brand" href="/" aria-label={t('brand.home')}><PathIcon small /><span>meander<span className="brand-period">.</span></span></a>;
+  const languagePicker = <div className="language-picker" role="group" aria-label={t('language.group')}>
+    {(['nl', 'en'] as const).map(value => <button type="button" key={value} lang={value}
+      aria-label={t(`language.${value}`)} aria-pressed={language === value} onClick={() => setLanguage(value)}>
+      {value.toUpperCase()}</button>)}
+  </div>;
+  const themePicker = <div className="theme-picker" role="group" aria-label={t('theme.group')}>
     {(['system', 'light', 'dark'] as ThemePreference[]).map(value => <button type="button" key={value}
-      aria-label={`${value[0].toUpperCase() + value.slice(1)} theme`} title={`${value[0].toUpperCase() + value.slice(1)} theme`}
+      aria-label={t(`theme.${value}` as const)} title={t(`theme.${value}` as const)}
       aria-pressed={themePreference === value} onClick={() => changePreference(value)}>
       <Icon name={value === 'system' ? 'system' : value === 'light' ? 'sun' : 'moon'} />
     </button>)}
   </div>;
-  const providerCredit = <div className="provider-credit">Routing &amp; search: <a href="https://openrouteservice.org/" target="_blank" rel="noreferrer">openrouteservice</a> · Data: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a></div>;
+  const providerCredit = <div className="provider-credit">{t('credit.routing')} <a href="https://openrouteservice.org/" target="_blank" rel="noreferrer">openrouteservice</a> · {t('credit.data')} <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a></div>;
 
   if (view === 'edit') {
-    const statusText = draftPhase === 'loading' ? 'Updating…' : draft ? `${draft.distanceKm.toFixed(2)} km` : lastGoodDraft ? `${lastGoodDraft.distanceKm.toFixed(2)} km` : '—';
+    const statusText = draftPhase === 'loading' ? t('edit.updating') : draft ? t('drawing.km', { km: number(draft.distanceKm, 2) }) : lastGoodDraft ? t('drawing.km', { km: number(lastGoodDraft.distanceKm, 2) }) : '—';
     return <div className="app-shell is-editing" style={{ '--inset-top': `${padding.top}px`, '--inset-bottom': `${padding.bottom}px`, '--inset-left': '0px' } as React.CSSProperties}>
       {routeMap}
       <div className="edit-top" data-map-overlay="top">
         <div className="edit-bar">
-          <button type="button" className="round-button floating" aria-label="Cancel editing" onClick={cancelEditing}><Icon name="close" /></button>
+          <button type="button" className="round-button floating" aria-label={t('edit.cancel')} onClick={cancelEditing}><Icon name="close" /></button>
           <div className="edit-status" role="status" aria-live="polite"><strong>{statusText}</strong>
-            <span>{drawnPoints.length} point{drawnPoints.length === 1 ? '' : 's'}</span></div>
+            <span>{t('drawing.points', { count: drawnPoints.length })}</span></div>
           <form onSubmit={event => void submit(event)} noValidate>
-            <button type="submit" className="primary-pill" aria-label="Save changes"
-              disabled={!draft || draftPhase !== 'ready' || editPhase !== 'idle'}>{editPhase === 'saving' ? 'Saving…' : 'Save'}</button>
+            <button type="submit" className="primary-pill" aria-label={t('edit.saveLabel')}
+              disabled={!draft || draftPhase !== 'ready' || editPhase !== 'idle'}>{editPhase === 'saving' ? t('edit.saving') : t('edit.save')}</button>
           </form>
         </div>
-        {(draftError || error) ? <div className="edit-banner is-error" role="alert">
-          <p>{error || <>{draftError}{lastGoodDraft && ' The last valid route is still shown. Undo or move a point to try again.'}</>}</p>
-          {draftError && !error && <button type="button" className="chip-button" onClick={refreshDrawing}>Retry</button>}
+        {(draftError.length > 0 || error.length > 0) ? <div className="edit-banner is-error" role="alert">
+          <p>{error.length > 0 ? say(error) : <>{say(draftError)}{lastGoodDraft && ` ${t('drawing.lastValid')}`}</>}</p>
+          {draftError.length > 0 && error.length === 0 && <button type="button" className="chip-button" onClick={refreshDrawing}>{t('edit.retry')}</button>}
         </div> : !hintDismissed && <div className="edit-banner">
-          <Icon name="move" /><p>Drag a point to reshape. Tap a small dot on the line to add one.</p>
-          <button type="button" className="round-button quiet" aria-label="Dismiss tip" onClick={dismissHint}><Icon name="close" /></button>
+          <Icon name="move" /><p>{t('edit.hint')}</p>
+          <button type="button" className="round-button quiet" aria-label={t('edit.dismissHint')} onClick={dismissHint}><Icon name="close" /></button>
         </div>}
       </div>
       <div className="edit-bottom" data-map-overlay="bottom">
-        {selectedPoint !== null && drawnPoints[selectedPoint] && <p className="edit-selection">Point {selectedPoint + 1} selected</p>}
-        <div className="edit-toolbar" role="toolbar" aria-label="Route editing">
+        {selectedPoint !== null && drawnPoints[selectedPoint] && <p className="edit-selection">{t('edit.selected', { n: selectedPoint + 1 })}</p>}
+        <div className="edit-toolbar" role="toolbar" aria-label={t('edit.toolbar')}>
           <button type="button" disabled={!hasDrawingHistory && drawnPoints.length === 0}
-            title="Undo last change (Ctrl+Z)" aria-keyshortcuts="Control+Z Meta+Z" onClick={undoDrawnPoint}><Icon name="undo" /><span>Undo</span></button>
+            title={t('drawing.undoTitle')} aria-keyshortcuts="Control+Z Meta+Z" onClick={undoDrawnPoint}><Icon name="undo" /><span>{t('drawing.undo')}</span></button>
           <button type="button" aria-pressed={mode === 'draw'} onClick={() => setMode(current => current === 'draw' ? 'browse' : 'draw')}>
-            <Icon name="plus" /><span>{mode === 'draw' ? 'Tap map' : 'Add'}</span></button>
+            <Icon name="plus" /><span>{mode === 'draw' ? t('edit.tapMap') : t('edit.add')}</span></button>
           <button type="button" disabled={selectedPoint === null || !drawnPoints[selectedPoint]} aria-keyshortcuts="Delete"
-            aria-label={selectedPoint !== null && drawnPoints[selectedPoint] ? `Remove point ${selectedPoint + 1}` : 'Remove point'}
-            onClick={() => selectedPoint !== null && removePoint(selectedPoint)}><Icon name="trash" /><span>Remove</span></button>
-          <button type="button" onClick={() => setFitRequest(n => n + 1)}><Icon name="fit" /><span>Fit</span></button>
+            aria-label={selectedPoint !== null && drawnPoints[selectedPoint] ? t('drawing.removePoint', { n: selectedPoint + 1 }) : t('edit.removePoint')}
+            onClick={() => selectedPoint !== null && removePoint(selectedPoint)}><Icon name="trash" /><span>{t('edit.remove')}</span></button>
+          <button type="button" onClick={() => setFitRequest(n => n + 1)}><Icon name="fit" /><span>{t('edit.fit')}</span></button>
         </div>
       </div>
     </div>;
@@ -838,28 +840,32 @@ export default function App() {
   return <div className={`app-shell step-${view} ${sheetCollapsed ? 'sheet-collapsed' : ''} ${mode === 'draw' ? 'is-drawing' : ''}`}
     style={{ '--inset-top': `${padding.top}px`, '--inset-bottom': `${padding.bottom}px`, '--inset-left': `${padding.left}px` } as React.CSSProperties}>
     {routeMap}
-    <header className="top-bar" data-map-overlay="topbar">{brand}{themePicker}</header>
-    <aside className="planner-sheet" aria-label="Route planner" data-map-overlay="sheet" {...sheetSwipe}>
+    <header className="top-bar" data-map-overlay="topbar">{brand}<div className="top-controls">{languagePicker}{themePicker}</div></header>
+    <aside className="planner-sheet" aria-label={t('sheet.planner')} data-map-overlay="sheet" {...sheetSwipe}>
       <button type="button" className="sheet-grabber" aria-expanded={!sheetCollapsed}
-        aria-label={sheetCollapsed ? 'Show the planner' : 'Show more map'} onClick={() => setSheetCollapsed(value => !value)}><span /></button>
+        aria-label={sheetCollapsed ? t('sheet.show') : t('sheet.more')} onClick={() => setSheetCollapsed(value => !value)}><span /></button>
       <div className="sheet-body">
-        {view === 'routes' ? renderRoutes() : <form className="wizard-step" onSubmit={event => void submit(event)} noValidate aria-label="Plan a route">
+        {view === 'routes' ? renderRoutes() : <form className="wizard-step" onSubmit={event => void submit(event)} noValidate aria-label={t('wizard.form')}>
           {renderQuestion()}
           {alerts}
-          {editPhase === 'opening' && <p className="notice" role="status">Opening the route editor…</p>}
+          {editPhase === 'opening' && <p className="notice" role="status">{t('actions.openingEditor')}</p>}
           <div className="step-actions">
             {view === 'preferences' ? <>
               <button type="submit" className="generate-button" disabled={phase === 'loading' || editPhase !== 'idle' || (drawnPoints.length > 0 || completeDrawing) && draftPhase !== 'ready'}>
-                {phase === 'loading' ? <><span className="spinner" /> {restoring ? 'Opening saved routes…' : 'Finding your way…'}</>
-                  : <>Find my routes <Icon name="next" /></>}
+                {phase === 'loading' ? <><span className="spinner" /> {restoring ? t('actions.opening') : t('actions.finding')}</>
+                  : <>{t('actions.find')} <Icon name="next" /></>}
               </button>
-              {phase === 'loading' && <button type="button" className="text-link" onClick={cancel}>Cancel</button>}
-            </> : <button type="submit" className="generate-button">Next: {view === 'start' ? 'distance' : 'preferences'} <Icon name="next" /></button>}
-            {candidates.length > 0 && phase === 'done' && <button type="button" className="text-link" onClick={() => goTo('routes')}>Back to routes</button>}
+              {phase === 'loading' && <button type="button" className="text-link" onClick={cancel}>{t('actions.cancel')}</button>}
+            </> : <button type="submit" className="generate-button">{t(view === 'start' ? 'actions.next.distance' : 'actions.next.preferences')} <Icon name="next" /></button>}
+            {candidates.length > 0 && phase === 'done' && <button type="button" className="text-link" onClick={() => goTo('routes')}>{t('actions.backToRoutes')}</button>}
           </div>
         </form>}
         {providerCredit}
       </div>
     </aside>
   </div>;
+}
+
+export default function App() {
+  return <I18nProvider><Planner /></I18nProvider>;
 }

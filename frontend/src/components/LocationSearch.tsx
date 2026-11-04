@@ -1,5 +1,7 @@
 import { useEffect, useId, useState } from 'react';
-import { geocode } from '../api';
+import { ApiError, geocode } from '../api';
+import { problemMessages } from '../apiText';
+import { useI18n, type Message } from '../i18n';
 import type { Place, Suggestion } from '../types';
 
 type Props = {
@@ -8,27 +10,28 @@ type Props = {
 };
 
 export function LocationSearch({ label, value, place, placeholder, onTextChange, onPick }: Props) {
+  const { t, say, number, language } = useI18n();
   const id = useId();
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [focused, setFocused] = useState(false);
   const [active, setActive] = useState(-1);
   const [searching, setSearching] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<Message | null>(null);
 
   useEffect(() => {
-    setSuggestions([]); setActive(-1); setError(''); setSearching(false);
+    setSuggestions([]); setActive(-1); setError(null); setSearching(false);
     if (value.trim().length < 3 || place || !focused) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setSearching(true);
-      void geocode(value.trim(), 'en', controller.signal).then(results => {
-        if (!controller.signal.aborted) { setSuggestions(results); if (!results.length) setError('No places found. Try another search or use the map.'); }
+      void geocode(value.trim(), language, controller.signal).then(results => {
+        if (!controller.signal.aborted) { setSuggestions(results); if (!results.length) setError({ key: 'search.noResults' }); }
       }).catch((ex: unknown) => {
-        if (!controller.signal.aborted) setError(ex instanceof Error ? ex.message : 'Search is unavailable. Try the map.');
+        if (!controller.signal.aborted) setError(ex instanceof ApiError ? problemMessages(ex, number)[0] : { key: 'search.unavailable' });
       }).finally(() => { if (!controller.signal.aborted) setSearching(false); });
     }, 350);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [value, place, focused]);
+  }, [value, place, focused, language]);
 
   function select(suggestion: Suggestion) {
     onPick({ label: suggestion.label, location: suggestion.location });
@@ -50,14 +53,14 @@ export function LocationSearch({ label, value, place, placeholder, onTextChange,
           if (e.key === 'Enter' && suggestions[active]) { e.preventDefault(); select(suggestions[active]); }
           if (e.key === 'Escape') { setSuggestions([]); setActive(-1); }
         }} />
-      {searching && <span className="search-spinner" aria-label="Searching" />}
-      {place && <span className="set-check" aria-label="Location selected">✓</span>}
+      {searching && <span className="search-spinner" aria-label={t('search.searching')} />}
+      {place && <span className="set-check" aria-label={t('search.selected')}>✓</span>}
     </div>
-    {focused && suggestions.length > 0 && <ul className="suggestions" id={`${id}-results`} role="listbox" aria-label={`${label} suggestions`}>
+    {focused && suggestions.length > 0 && <ul className="suggestions" id={`${id}-results`} role="listbox" aria-label={t('search.suggestions', { label })}>
       {suggestions.map((suggestion, index) => <li key={suggestion.id} role="option" id={`${id}-${index}`}
         aria-selected={active === index} onMouseDown={e => e.preventDefault()}
         onMouseEnter={() => setActive(index)} onClick={() => select(suggestion)}>{suggestion.label}</li>)}
     </ul>}
-    {error && <p id={`${id}-error`} className="field-help field-error" role="alert">{error}</p>}
+    {error && <p id={`${id}-error`} className="field-help field-error" role="alert">{say(error)}</p>}
   </div>;
 }

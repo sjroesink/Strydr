@@ -28,7 +28,10 @@ vi.mock('./components/RouteMap', () => ({
   </div>,
 }));
 
+afterEach(() => { window.localStorage.removeItem('meander.language'); });
+
 beforeEach(() => {
+  window.localStorage.removeItem('meander.language');
   vi.mocked(generate).mockReset(); vi.mocked(downloadGpx).mockReset();
   vi.mocked(previewRoute).mockReset();
   vi.mocked(loadSearch).mockReset();
@@ -105,7 +108,7 @@ it('undoing a point aborts the old preview and ignores its late response', async
 });
 
 it('retries a failed preview and clears the drawing', async () => {
-  vi.mocked(previewRoute).mockRejectedValueOnce(new Error('No path near this point.'))
+  vi.mocked(previewRoute).mockRejectedValueOnce(new ApiError({ title: 'No path', detail: 'No path near this point.', status: 422 }))
     .mockResolvedValueOnce({ ...candidate(), id: 'drawn-1' });
   render(<App />); await chooseStart(); await toPreferences(); await startDrawing();
   await userEvent.click(screen.getByRole('button', { name: 'Set draw fixture' }));
@@ -551,4 +554,28 @@ it('cancels editing back to the saved routes and remembers a dismissed tip', asy
   await userEvent.click(screen.getByRole('button', { name: 'Cancel editing' }));
   expect(await screen.findByRole('button', { name: /Route 2/ })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+});
+
+it('follows a Dutch browser and switches to English with the toggle', async () => {
+  const languages = vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['nl-NL']);
+  try {
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: 'Waar begin je?' })).toBeInTheDocument();
+    expect(document.documentElement.lang).toBe('nl');
+    fireEvent.click(screen.getByRole('button', { name: 'English' }));
+    expect(await screen.findByRole('heading', { name: 'Where do you start?' })).toBeInTheDocument();
+    expect(localStorage.getItem('meander.language')).toBe('en');
+  } finally { languages.mockRestore(); }
+});
+
+it('shows translated route warnings in Dutch', async () => {
+  localStorage.setItem('meander.language', 'nl');
+  vi.mocked(generate).mockResolvedValue([{ ...candidate(), warnings: [
+    { code: 'startSnapped', message: 'Start moved 40 m to the nearest routable path.', params: { meters: 40 } }] }]);
+  render(<App />);
+  await userEvent.click(screen.getByRole('button', { name: 'Set start fixture' }));
+  await userEvent.click(screen.getByRole('button', { name: /Volgende: afstand/ }));
+  await userEvent.click(screen.getByRole('button', { name: /Volgende: voorkeuren/ }));
+  await userEvent.click(screen.getByRole('button', { name: /Vind mijn routes/ }));
+  expect(await screen.findByText('Start 40 m verplaatst naar het dichtstbijzijnde pad.')).toBeInTheDocument();
 });
