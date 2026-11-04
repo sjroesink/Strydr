@@ -56,6 +56,47 @@ public sealed class PersistenceTests
     }
 
     [Fact]
+    public async Task SavedRidesKeepTheirActivityAfterRestart()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"meander-{Guid.NewGuid():N}.sqlite");
+        var settings = new Dictionary<string, string?> { ["ResultStorage:DatabasePath"] = path };
+        try
+        {
+            JsonElement route;
+            await using (var app = new ApiFactory(new(), settings))
+            {
+                using var client = app.CreateClient();
+                using var response = await client.PostAsJsonAsync("/api/routes/generate", new {
+                    start = Fixtures.Start, targetDistanceKm = 5, activity = "cycling"
+                });
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                route = (await response.Content.ReadFromJsonAsync<JsonElement>())[0].Clone();
+            }
+            await using (var app = new ApiFactory(new() { FailureStatus = HttpStatusCode.InternalServerError }, settings))
+            {
+                using var client = app.CreateClient();
+                var saved = await client.GetFromJsonAsync<JsonElement>($"/api/searches/{route.GetProperty("searchId").GetGuid()}");
+                Assert.Equal("cycling", saved.GetProperty("request").GetProperty("activity").GetString());
+                var fit = await client.GetByteArrayAsync($"/api/routes/{route.GetProperty("id").GetGuid()}/fit");
+                Assert.Equal(Dynastream.Fit.Sport.Cycling, FitSport(fit));
+            }
+        }
+        finally { await DeleteDatabaseAsync(path); }
+    }
+
+    private static Dynastream.Fit.Sport? FitSport(byte[] fit)
+    {
+        var decode = new Dynastream.Fit.Decode();
+        var broadcaster = new Dynastream.Fit.MesgBroadcaster();
+        decode.MesgEvent += broadcaster.OnMesg;
+        Dynastream.Fit.Sport? sport = null;
+        broadcaster.CourseMesgEvent += (_, e) => sport = ((Dynastream.Fit.CourseMesg)e.mesg).GetSport();
+        using var stream = new MemoryStream(fit);
+        decode.Read(stream);
+        return sport;
+    }
+
+    [Fact]
     public async Task SavedDrawingAndQualitySurviveExpiryAndCanBeReusedAfterRestart()
     {
         var path = Path.Combine(Path.GetTempPath(), $"meander-{Guid.NewGuid():N}.sqlite");

@@ -24,7 +24,7 @@ public static class GarminCourseMapper
             Math.Round(route.DistanceKm * 1000, 1),
             Math.Round(gain, 1),
             Math.Round(Descent(route.Geometry.Coordinates) ?? gain, 1),
-            activity == Activity.Walking ? "WALKING" : "RUNNING",
+            activity switch { Activity.Walking => "WALKING", Activity.Cycling => "ROAD_CYCLING", _ => "RUNNING" },
             "WGS84",
             route.Geometry.Coordinates.Select(p => new GarminGeoPoint(p[1], p[0], p.Length > 2 ? p[2] : null)).ToArray());
     }

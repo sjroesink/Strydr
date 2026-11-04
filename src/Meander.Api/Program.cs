@@ -318,6 +318,7 @@ public static class ConfigurationChecks
             ors.DirectionsPerMinute < 1 || ors.GeocodingPerMinute < 1 || ors.SnapsPerMinute < 1)
             throw new InvalidOperationException("Invalid Ors limits. Use concurrency 1–20, timeout 1–25 seconds, retries 0–5, and positive request budgets.");
         if (!double.IsFinite(generation.MaxDistanceKm) || generation.MaxDistanceKm < .5 || generation.MaxDistanceKm > 100 ||
+            !double.IsFinite(generation.MaxCyclingDistanceKm) || generation.MaxCyclingDistanceKm < .5 || generation.MaxCyclingDistanceKm > 100 ||
             !double.IsFinite(generation.SnapRadiusM) || generation.SnapRadiusM <= 0 || generation.SnapRadiusM > 10000 ||
             !double.IsFinite(generation.SnapWarningM) || generation.SnapWarningM < 0 ||
             !double.IsFinite(generation.DistanceTolerance) || generation.DistanceTolerance <= 0 || generation.DistanceTolerance > .5 ||

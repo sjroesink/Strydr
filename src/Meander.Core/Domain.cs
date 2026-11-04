@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Meander.Core;
 
-public enum Activity { Running, Walking }
+public enum Activity { Running, Walking, Cycling }
 public enum CandidateStatus { Qualified, BestEffort, Diagnostic }
 
 public sealed record Location([property: JsonRequired] double Latitude,
@@ -81,11 +81,13 @@ public interface ICandidateStore
 public sealed class GenerationOptions
 {
     public double MaxDistanceKm { get; set; } = 60;
+    public double MaxCyclingDistanceKm { get; set; } = 100;
     public double SnapRadiusM { get; set; } = 1000;
     public double SnapWarningM { get; set; } = 200;
     public double DistanceTolerance { get; set; } = .05;
     public int DeadlineSeconds { get; set; } = 45;
     public int CacheTtlMinutes { get; set; } = 30;
+    public double MaxDistanceKmFor(Activity activity) => activity == Activity.Cycling ? MaxCyclingDistanceKm : MaxDistanceKm;
 }
 
 public sealed record RouteDistanceRange(double MinKm, double MaxKm)
@@ -95,7 +97,7 @@ public sealed record RouteDistanceRange(double MinKm, double MaxKm)
     {
         var tolerance = Math.Max(options.DistanceTolerance, request.DistanceFlexibilityPercent / 100);
         return new(Math.Max(.5, request.TargetDistanceKm * (1 - tolerance)),
-            Math.Min(options.MaxDistanceKm, request.TargetDistanceKm * (1 + tolerance)));
+            Math.Min(options.MaxDistanceKmFor(request.Activity), request.TargetDistanceKm * (1 + tolerance)));
     }
 }
 
@@ -137,11 +139,12 @@ public static class RequestValidation
         var errors = new Dictionary<string, string[]>();
         if (!Geo.IsValid(request.Start)) errors["start"] = ["Choose a valid start location."];
         if (request.End is not null && !Geo.IsValid(request.End)) errors["end"] = ["Choose a valid end location."];
-        if (!double.IsFinite(request.TargetDistanceKm) || request.TargetDistanceKm < .5 || request.TargetDistanceKm > options.MaxDistanceKm)
-            errors["targetDistanceKm"] = [$"Distance must be between 0.5 and {options.MaxDistanceKm} km."];
+        var maxDistanceKm = options.MaxDistanceKmFor(request.Activity);
+        if (!double.IsFinite(request.TargetDistanceKm) || request.TargetDistanceKm < .5 || request.TargetDistanceKm > maxDistanceKm)
+            errors["targetDistanceKm"] = [$"Distance must be between 0.5 and {maxDistanceKm} km."];
         if (request.RadiusKm is { } radius && (!double.IsFinite(radius) || radius <= 0))
             errors["radiusKm"] = ["Radius must be a positive number."];
-        if (!Enum.IsDefined(request.Activity)) errors["activity"] = ["Choose Running or Walking."];
+        if (!Enum.IsDefined(request.Activity)) errors["activity"] = ["Choose Running, Walking or Cycling."];
         if (request.CandidateCount is < 1 or > 3) errors["candidateCount"] = ["Request between one and three candidates."];
         if (request.DrawnRouteId == Guid.Empty) errors["drawnRouteId"] = ["Choose a valid drawn section."];
         if (!double.IsFinite(request.DistanceFlexibilityPercent) || request.DistanceFlexibilityPercent != 0 &&

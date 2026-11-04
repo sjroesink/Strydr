@@ -30,8 +30,8 @@ public sealed class OrsProvider(HttpClient client, ActivityProfiles profiles, Or
 
     public Task<RouteResult> RoundTripAsync(RoundTripQuery query, CancellationToken cancellationToken)
     {
-        var body = MakeBody([query.Start], query.Preferences);
-        var options = MakeOptions(query.Preferences);
+        var body = MakeBody([query.Start], query.Activity, query.Preferences);
+        var options = MakeOptions(query.Activity, query.Preferences);
         options["round_trip"] = new { length = query.DistanceKm * 1000, points = query.Points, seed = query.Seed };
         body["options"] = options;
         return DirectionsAsync(query.Activity, body, cancellationToken);
@@ -42,33 +42,34 @@ public sealed class OrsProvider(HttpClient client, ActivityProfiles profiles, Or
         // Keep the baseline truly shortest; scenery preferences must not inflate
         // the minimum distance used by validation.
         var preferences = query.Shortest ? null : query.Preferences;
-        var body = MakeBody(query.Points, preferences);
+        var body = MakeBody(query.Points, query.Activity, preferences);
         body["preference"] = query.Shortest ? "shortest" : "recommended";
         body["radiuses"] = query.Points.Select(_ => 1000).ToArray();
-        var options = MakeOptions(preferences);
+        var options = MakeOptions(query.Activity, preferences);
         if (options.Count > 0) body["options"] = options;
         return DirectionsAsync(query.Activity, body, cancellationToken);
     }
 
-    private bool UseGreen(RoutePreferences? preferences) => preferences?.PreferGreen == true && options.SupportsGreen;
+    private bool UseGreen(Activity activity, RoutePreferences? preferences) =>
+        preferences?.PreferGreen == true && options.SupportsGreen && profiles.SupportsGreen(activity);
 
-    private Dictionary<string, object> MakeBody(IReadOnlyList<Location> points, RoutePreferences? preferences)
+    private Dictionary<string, object> MakeBody(IReadOnlyList<Location> points, Activity activity, RoutePreferences? preferences)
     {
         var body = new Dictionary<string, object>
         {
             ["coordinates"] = points.Select(Coordinate), ["elevation"] = true, ["instructions"] = false
         };
         var extras = new List<string>();
-        if (UseGreen(preferences)) extras.Add("green");
+        if (UseGreen(activity, preferences)) extras.Add("green");
         if (preferences?.PreferUnpaved == true) extras.Add("surface");
         if (extras.Count > 0) body["extra_info"] = extras;
         return body;
     }
 
-    private Dictionary<string, object> MakeOptions(RoutePreferences? preferences)
+    private Dictionary<string, object> MakeOptions(Activity activity, RoutePreferences? preferences)
     {
         var options = new Dictionary<string, object>();
-        if (UseGreen(preferences))
+        if (UseGreen(activity, preferences))
             options["profile_params"] = new { weightings = new { green = 1 } };
         return options;
     }

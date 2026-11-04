@@ -8,7 +8,14 @@ namespace Meander.Core;
 public interface IWoodlandProvider
 {
     // Null means unavailable. An empty map means the lookup succeeded but found no woodland.
-    Task<WoodlandMap?> FindAsync(Location center, double radiusKm, CancellationToken cancellationToken);
+    // The activity picks the paths that may carry anchors: a footway is no anchor for a ride.
+    Task<WoodlandMap?> FindAsync(Location center, double radiusKm, Activity activity, CancellationToken cancellationToken);
+}
+
+// One woodland lookup, with the anchor paths on foot and by bike over the same polygons.
+public sealed record WoodlandArea(WoodlandMap OnFoot, WoodlandMap ByBike)
+{
+    public WoodlandMap For(Activity activity) => activity == Activity.Cycling ? ByBike : OnFoot;
 }
 
 public sealed record WoodlandPolygon(IReadOnlyList<Location> Outer, IReadOnlyList<IReadOnlyList<Location>> Holes);
@@ -23,6 +30,7 @@ public sealed class WoodlandMap
     private readonly STRtree<Location> pathIndex = new();
     private readonly HashSet<Location> pathSet;
     public int PolygonCount { get; }
+    public int PathCount => pathPoints.Length;
 
     public WoodlandMap(Location center, IReadOnlyList<WoodlandPolygon> polygons, IReadOnlyList<Location> paths)
     {
@@ -41,10 +49,27 @@ public sealed class WoodlandMap
             catch (ArgumentException) { /* Incomplete OSM rings are never treated as filled woodland. */ }
         }
         index.Build();
-        pathPoints = paths.Where(Contains).DistinctBy(p => (Math.Round(p.Latitude, 5), Math.Round(p.Longitude, 5))).ToArray();
-        pathSet = [.. pathPoints];
-        foreach (var point in pathPoints) pathIndex.Insert(new Envelope(Coordinate(point)), point);
+        pathPoints = IndexPaths(paths, out pathSet);
+    }
+
+    // The same woodland with other anchor paths; the polygon index is shared, not rebuilt.
+    private WoodlandMap(WoodlandMap woodland, IReadOnlyList<Location> paths)
+    {
+        center = woodland.center;
+        index = woodland.index;
+        PolygonCount = woodland.PolygonCount;
+        pathPoints = IndexPaths(paths, out pathSet);
+    }
+
+    public WoodlandMap WithPaths(IReadOnlyList<Location> paths) => new(this, paths);
+
+    private Location[] IndexPaths(IReadOnlyList<Location> paths, out HashSet<Location> set)
+    {
+        var points = paths.Where(Contains).DistinctBy(p => (Math.Round(p.Latitude, 5), Math.Round(p.Longitude, 5))).ToArray();
+        set = [.. points];
+        foreach (var point in points) pathIndex.Insert(new Envelope(Coordinate(point)), point);
         pathIndex.Build();
+        return points;
     }
 
     private Coordinate Coordinate(Location p) => new(center.Longitude + ((p.Longitude - center.Longitude + 540) % 360) - 180, p.Latitude);

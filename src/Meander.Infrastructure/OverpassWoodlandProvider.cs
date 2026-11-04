@@ -27,23 +27,23 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
     private readonly MemoryCache cache = new(new MemoryCacheOptions { SizeLimit = Math.Max(32, options.MaxResponseMegabytes * 16) * 1024L * 1024 });
     private readonly SemaphoreSlim gate = new(1);
     private DateTimeOffset lastRequest = DateTimeOffset.MinValue;
-    private sealed record Cached(WoodlandMap? Map);
+    private sealed record Cached(WoodlandArea? Area);
 
-    public async Task<WoodlandMap?> FindAsync(Location center, double radiusKm, CancellationToken cancellationToken)
+    public async Task<WoodlandMap?> FindAsync(Location center, double radiusKm, Activity activity, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         // Cover the rounded centre's displacement, so cache reuse never loses the requested area.
         var queryCenter = new Location(Math.Round(center.Latitude, 2), Math.Round(center.Longitude, 2));
         var radius = Math.Min(options.MaxSearchRadiusKm + 1, Math.Ceiling(Math.Min(radiusKm, options.MaxSearchRadiusKm)) + 1);
         var key = (queryCenter.Latitude, queryCenter.Longitude, radius);
-        if (cache.TryGetValue<Cached>(key, out var hit)) return hit!.Map;
+        if (cache.TryGetValue<Cached>(key, out var hit)) return hit!.Area?.For(activity);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(options.TimeoutSeconds));
         var entered = false;
         try
         {
             await gate.WaitAsync(deadline.Token); entered = true;
-            if (cache.TryGetValue<Cached>(key, out hit)) return hit!.Map;
+            if (cache.TryGetValue<Cached>(key, out hit)) return hit!.Area?.For(activity);
             var gap = lastRequest.AddSeconds(1) - clock.GetUtcNow();
             if (gap > TimeSpan.Zero) await Task.Delay(gap, deadline.Token);
             lastRequest = clock.GetUtcNow();
@@ -55,11 +55,11 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
             response.EnsureSuccessStatusCode();
             using var json = await response.Content.ReadFromJsonAsync<JsonDocument>(deadline.Token)
                 ?? throw new JsonException("Empty woodland response.");
-            var map = Parse(queryCenter, json.RootElement, options.MaxResponseMegabytes * 2500);
-            cache.Set(key, new Cached(map), new MemoryCacheEntryOptions()
+            var area = Parse(queryCenter, json.RootElement, options.MaxResponseMegabytes * 2500);
+            cache.Set(key, new Cached(area), new MemoryCacheEntryOptions()
                 .SetAbsoluteExpiration(TimeSpan.FromHours(options.CacheHours))
                 .SetSize(Math.Max(4096, json.RootElement.GetRawText().Length * 4L)));
-            return map;
+            return area.For(activity);
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or OperationCanceledException or KeyNotFoundException or FormatException)
         {
@@ -88,17 +88,18 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
               way(pivot.here)[boundary=national_park]; rel(pivot.here)[boundary=national_park];
             ); out geom;
             way{around}[highway~"^(path|footway|track|bridleway|cycleway|pedestrian|living_street)$"]
-              [access!~"^(no|private)$"][foot!~"^(no|private)$"]; out geom;
+              [access!~"^(no|private)$"]; out geom;
             """;
     }
 
     // The element limit scales with the response cap: 20,000 elements for the default 8 MB.
-    public static WoodlandMap Parse(Location center, JsonElement root, int maxElements = 20000)
+    public static WoodlandArea Parse(Location center, JsonElement root, int maxElements = 20000)
     {
         // Overpass can return HTTP 200 with an incomplete result and a timeout remark.
         if (root.TryGetProperty("remark", out _)) throw new JsonException("Incomplete woodland response.");
         var polygons = new List<WoodlandPolygon>();
-        var paths = new List<Location>();
+        var footPaths = new List<Location>();
+        var bikePaths = new List<Location>();
         var elements = root.GetProperty("elements");
         if (elements.GetArrayLength() > maxElements) throw new JsonException("Woodland response is too large.");
         foreach (var element in elements.EnumerateArray())
@@ -133,11 +134,20 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
                 }
             }
             if (type == "way" && Tag("highway") is "path" or "footway" or "track" or "bridleway" or "cycleway" or "pedestrian" or "living_street" &&
-                Tag("access") is not ("no" or "private") && Tag("foot") is not ("no" or "private") &&
-                element.TryGetProperty("geometry", out geometry))
-                paths.AddRange(Geo.Sample(Points(geometry), .075));
+                Tag("access") is not ("no" or "private") && element.TryGetProperty("geometry", out geometry))
+            {
+                var samples = Geo.Sample(Points(geometry), .075);
+                if (Tag("foot") is not ("no" or "private")) footPaths.AddRange(samples);
+                // Cycleways, tracks and living streets are open to bikes unless signed otherwise;
+                // paths and footways only where cycling is explicitly allowed.
+                var bicycle = Tag("bicycle");
+                if (bicycle is "yes" or "designated" or "permissive" ||
+                    bicycle is not ("no" or "private") && Tag("highway") is "cycleway" or "track" or "living_street")
+                    bikePaths.AddRange(samples);
+            }
         }
-        return new(center, polygons, paths);
+        var onFoot = new WoodlandMap(center, polygons, footPaths);
+        return new(onFoot, onFoot.WithPaths(bikePaths));
     }
 
     private static Location[] Points(JsonElement geometry)

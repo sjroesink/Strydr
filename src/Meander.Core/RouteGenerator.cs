@@ -129,7 +129,7 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
             if (request.PreferGreen && woodlands is not null)
             {
                 woodland = await woodlands.FindAsync(exploreDrawn ? searchStart : Geo.Interpolate(searchStart, end.Snapped, .5),
-                    distanceRange.MaxKm / 2, ct);
+                    distanceRange.MaxKm / 2, request.Activity, ct);
                 if (woodland is null)
                     warnings.Add(new("woodlandUnavailable", "Could not look up nearby nature. These routes may not follow your green preference. Try again later."));
             }
@@ -436,7 +436,7 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
         var failure = failures.FirstOrDefault(f => f != ProviderFailure.NoRoute, ProviderFailure.NoRoute);
         if (failure == ProviderFailure.NoRoute)
             throw new RouteValidationException("noUsableRoute",
-                "No usable route was found. The area may have water, disconnected paths, or a sparse walking network. Try another start or distance." +
+                "No usable route was found. The area may have water, disconnected paths, or a sparse path network. Try another start or distance." +
                 (avoidBacktracking ? " You can also turn off out-and-back avoidance if no circular paths are available." : ""),
                 parameters: new Dictionary<string, double> { ["avoidBacktracking"] = avoidBacktracking ? 1 : 0 });
         throw new ProviderException(failure, failure switch
