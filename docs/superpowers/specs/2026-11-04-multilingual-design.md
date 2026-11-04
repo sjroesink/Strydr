@@ -67,7 +67,7 @@ ProblemDetails responses gain a `code` extension, plus a `params` extension wher
 
 ### Place search
 
-`GET /api/geocode` takes an optional `lang` (`nl` or `en`). The Photon provider passes it as Photon's `lang` parameter, overriding the configured `Photon:Language`. The ORS geocoder ignores it.
+`GET /api/geocode` takes an optional `lang` (`nl` or `en`). The Photon provider passes it as Photon's `lang` parameter, overriding the configured `Photon:Language`; `nl` becomes Photon's `default` (local names), since Photon has no Dutch index and rejects `lang=nl`. The ORS geocoder ignores it.
 
 ## 4. Tests
 

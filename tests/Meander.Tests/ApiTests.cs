@@ -352,7 +352,7 @@ public sealed class ApiTests
         await using var app = new ApiFactory(upstream, new() { ["Geocoding:Provider"] = "Photon", ["Photon:BaseUrl"] = "http://photon:2322/", ["Photon:Language"] = "en" });
         using var client = app.CreateClient();
         await client.GetFromJsonAsync<JsonElement>("/api/geocode?q=Utrecht&lang=nl");
-        Assert.Contains("lang=nl", Assert.Single(upstream.Queries));
+        Assert.Contains("lang=default", Assert.Single(upstream.Queries));
         await client.GetFromJsonAsync<JsonElement>("/api/geocode?q=Utrecht&lang=xx");
         Assert.Contains(upstream.Queries, q => q.Contains("lang=en"));
     }

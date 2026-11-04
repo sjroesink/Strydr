@@ -13,6 +13,9 @@ public sealed class PhotonGeocodingProvider(HttpClient client, PhotonOptions opt
         // same label; over-fetch and keep the first of each label.
         var path = $"api?q={Uri.EscapeDataString(query)}&limit=15";
         var lang = (language ?? options.Language)?.Trim();
+        // Photon indexes only default, en, de, fr and it, and rejects other languages with a 400.
+        // Its default names are the local ones, which is Dutch in the Netherlands.
+        if (string.Equals(lang, "nl", StringComparison.OrdinalIgnoreCase)) lang = "default";
         if (!string.IsNullOrWhiteSpace(lang)) path += $"&lang={Uri.EscapeDataString(lang)}";
         using var response = await SendAsync(client, HttpMethod.Get, path, null, cancellationToken);
         using var json = await ReadAsync(response, cancellationToken);
