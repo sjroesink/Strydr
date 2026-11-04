@@ -14,12 +14,13 @@ public sealed record GarminCourse(string CourseName, string Description, double 
 // The only place that knows Garmin's course payload.
 public static class GarminCourseMapper
 {
-    public static GarminCourse Map(RouteCandidate route, Activity activity)
+    public static GarminCourse Map(RouteCandidate route, Activity activity, Uri? routeUrl)
     {
         var gain = route.ElevationGainM ?? 0;
         return new(
             $"Meander {route.DistanceKm.ToString("F1", CultureInfo.InvariantCulture)} km",
-            "Planned with Meander",
+            // The way back from Garmin Connect to this route in Meander.
+            routeUrl is null ? "Planned with Meander" : $"Meander route: {routeUrl}",
             Math.Round(route.DistanceKm * 1000, 1),
             Math.Round(gain, 1),
             Math.Round(Descent(route.Geometry.Coordinates) ?? gain, 1),
@@ -41,11 +42,11 @@ public sealed class GarminCourseDestination(HttpClient http, GarminOptions optio
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public ServiceKind Service => ServiceKind.Garmin;
 
-    public async Task<SentRoute> SendAsync(RouteCandidate route, Activity activity, ServiceTokens tokens, CancellationToken ct)
+    public async Task<SentRoute> SendAsync(RouteCandidate route, Activity activity, Uri? routeUrl, ServiceTokens tokens, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, options.CourseUrl)
         {
-            Content = JsonContent.Create(GarminCourseMapper.Map(route, activity), options: Json)
+            Content = JsonContent.Create(GarminCourseMapper.Map(route, activity, routeUrl), options: Json)
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
         using var response = await http.SendAsync(request, ct);

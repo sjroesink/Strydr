@@ -109,6 +109,7 @@ public static class ConnectionEndpoints
                     store.Upsert(held with { SessionId = rotated });
                     store.Delete(session, held.Service);
                 }
+                store.MoveSent(session, rotated);
                 store.Upsert(new ServiceConnection(rotated, connector.Service, tokens, clock.GetUtcNow()));
                 context.Response.Cookies.Append(SessionCookie, rotated.ToString(), Cookie(options, SessionLifetime));
             }
@@ -144,9 +145,17 @@ public static class ConnectionEndpoints
             return Results.NoContent();
         }).RequireRateLimiting("connect");
 
+        app.MapGet("/api/routes/sent", (HttpContext context, IConnectionStore store) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            var sent = SessionId(context) is { } session ? store.ListSent(session) : [];
+            return Results.Ok(sent.Select(s => new { s.RouteId, s.Service, s.Sent.ExternalId, s.Sent.ViewUrl }));
+        });
+
         app.MapPost("/api/routes/{id:guid}/send/{service}", async (Guid id, string service, HttpContext context,
             ConnectionService connections, IEnumerable<IRouteDestination> destinations, IRouteSearchStore searches,
-            ICandidateStore cache, ILogger<ConnectionService> logger, CancellationToken ct) =>
+            ICandidateStore cache, IConnectionStore store, ConnectionOptions options, TimeProvider clock,
+            ILogger<ConnectionService> logger, CancellationToken ct) =>
         {
             context.Response.Headers.CacheControl = "no-store";
             if (Connector(service, connections) is not { } connector ||
@@ -156,10 +165,14 @@ public static class ConnectionEndpoints
                     detail: "This route is unavailable. Open a saved route or generate a new one.", extensions: Code("routeNotFound"));
             if (SessionId(context) is not { } session)
                 return Results.Problem(statusCode: 401, title: "Not connected", detail: $"Connect {connector.Service} first.", extensions: Code("notConnected"));
+            var routeUrl = found.Route.SearchId is { } searchId && Uri.TryCreate(options.PublicBaseUrl, UriKind.Absolute, out var publicBase)
+                ? new Uri(publicBase, $"/routes/{searchId}?route={id}") : null;
             try
             {
-                return Results.Ok(await connections.UseAsync(session, connector.Service,
-                    tokens => destination.SendAsync(found.Route, found.Activity, tokens, ct), ct));
+                var sent = await connections.UseAsync(session, connector.Service,
+                    tokens => destination.SendAsync(found.Route, found.Activity, routeUrl, tokens, ct), ct);
+                store.RecordSent(session, new(id, connector.Service, sent, clock.GetUtcNow()));
+                return Results.Ok(sent);
             }
             catch (ProviderException ex) when (ex.Failure == ProviderFailure.Unauthorized)
             {

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -35,6 +36,10 @@ public sealed class SqliteConnectionStore : IConnectionStore, IDisposable
                 session_id TEXT NOT NULL, service TEXT NOT NULL, external_user TEXT, json TEXT NOT NULL,
                 PRIMARY KEY (session_id, service));
             CREATE INDEX IF NOT EXISTS connections_external_user ON connections (service, external_user);
+            CREATE TABLE IF NOT EXISTS sent_routes (
+                session_id TEXT NOT NULL, service TEXT NOT NULL, route_id TEXT NOT NULL,
+                external_id TEXT NOT NULL, view_url TEXT, sent_at TEXT NOT NULL,
+                PRIMARY KEY (session_id, service, route_id));
             """;
         command.ExecuteNonQuery();
     }
@@ -56,9 +61,52 @@ public sealed class SqliteConnectionStore : IConnectionStore, IDisposable
         Execute("DELETE FROM connections WHERE session_id = $session AND service = $service",
             ("$session", sessionId.ToString()), ("$service", service.ToString()));
 
-    public int DeleteByExternalUser(ServiceKind service, string externalUserId) =>
-        Execute("DELETE FROM connections WHERE service = $service AND external_user = $user",
-            ("$service", service.ToString()), ("$user", Hash(externalUserId)));
+    public int DeleteByExternalUser(ServiceKind service, string externalUserId)
+    {
+        var parameters = new[] { ("$service", (object?)service.ToString()), ("$user", Hash(externalUserId)) };
+        lock (gate)
+        {
+            Execute("""
+                DELETE FROM sent_routes WHERE service = $service
+                    AND session_id IN (SELECT session_id FROM connections WHERE service = $service AND external_user = $user)
+                """, parameters);
+            return Execute("DELETE FROM connections WHERE service = $service AND external_user = $user", parameters);
+        }
+    }
+
+    // Course ids and links are not secrets, so unlike tokens they are plain columns.
+    public void RecordSent(Guid sessionId, SentRouteRecord sent) => Execute("""
+        INSERT INTO sent_routes (session_id, service, route_id, external_id, view_url, sent_at)
+        VALUES ($session, $service, $route, $external, $view, $at)
+        ON CONFLICT(session_id, service, route_id) DO UPDATE SET
+            external_id = excluded.external_id, view_url = excluded.view_url, sent_at = excluded.sent_at
+        """, ("$session", sessionId.ToString()), ("$service", sent.Service.ToString()), ("$route", sent.RouteId.ToString()),
+        ("$external", sent.Sent.ExternalId), ("$view", sent.Sent.ViewUrl?.ToString()), ("$at", sent.SentAt.ToString("O")));
+
+    public IReadOnlyList<SentRouteRecord> ListSent(Guid sessionId)
+    {
+        lock (gate)
+        {
+            using var command = Command("SELECT route_id, service, external_id, view_url, sent_at FROM sent_routes WHERE session_id = $session ORDER BY sent_at",
+                [("$session", sessionId.ToString())]);
+            using var reader = command.ExecuteReader();
+            var results = new List<SentRouteRecord>();
+            while (reader.Read())
+                if (Enum.TryParse<ServiceKind>(reader.GetString(1), out var service))
+                    results.Add(new(Guid.Parse(reader.GetString(0)), service,
+                        new(reader.GetString(2), reader.IsDBNull(3) ? null : new Uri(reader.GetString(3))),
+                        DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture)));
+            return results;
+        }
+    }
+
+    public void MoveSent(Guid fromSessionId, Guid toSessionId) =>
+        Execute("UPDATE sent_routes SET session_id = $to WHERE session_id = $from",
+            ("$from", fromSessionId.ToString()), ("$to", toSessionId.ToString()));
+
+    public void DeleteSent(Guid sessionId, ServiceKind service) =>
+        Execute("DELETE FROM sent_routes WHERE session_id = $session AND service = $service",
+            ("$session", sessionId.ToString()), ("$service", service.ToString()));
 
     private List<ServiceConnection> Query(string sql, params (string Name, object? Value)[] parameters)
     {

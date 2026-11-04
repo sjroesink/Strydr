@@ -1,5 +1,5 @@
 import type { Language } from './i18n';
-import type { ApiProblem, RouteCandidate, RouteEditSession, RoutePreviewRequest, RouteRequest, SavedRouteSearch, SentRoute, ServiceConnectionStatus, ServiceKind, Suggestion } from './types';
+import type { ApiProblem, RouteCandidate, RouteEditSession, RoutePreviewRequest, RouteRequest, SavedRouteSearch, SentRoute, SentRouteRecord, ServiceConnectionStatus, ServiceKind, Suggestion } from './types';
 
 export class ApiError extends Error {
   problem: ApiProblem;
@@ -63,6 +63,9 @@ export const connectUrl = (service: ServiceKind, returnUrl: string) =>
   `/api/connections/${service}/authorize?returnUrl=${encodeURIComponent(returnUrl)}`;
 export async function disconnect(service: ServiceKind) {
   await checked(await fetch(`/api/connections/${service}`, { method: 'DELETE' }));
+}
+export async function listSent(signal?: AbortSignal): Promise<SentRouteRecord[]> {
+  return (await checked(await fetch('/api/routes/sent', { signal }))).json() as Promise<SentRouteRecord[]>;
 }
 export async function sendRoute(id: string, service: ServiceKind, signal: AbortSignal): Promise<SentRoute> {
   return (await checked(await fetch(`/api/routes/${encodeURIComponent(id)}/send/${service}`, { method: 'POST', signal }))).json() as Promise<SentRoute>;

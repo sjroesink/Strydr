@@ -38,3 +38,4 @@ export type ApiProblem = {
 export type ServiceKind = 'garmin';
 export type ServiceConnectionStatus = { service: ServiceKind; connected: boolean };
 export type SentRoute = { externalId: string; viewUrl: string | null };
+export type SentRouteRecord = SentRoute & { routeId: string; service: ServiceKind };

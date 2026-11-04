@@ -1,13 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import { ApiError, connectUrl, disconnect, downloadFit, downloadGpx, editRoute, generate, listConnections, loadSearch, previewRoute, saveRoute, sendRoute } from './api';
+import { ApiError, connectUrl, disconnect, downloadFit, downloadGpx, editRoute, generate, listConnections, listSent, loadSearch, previewRoute, saveRoute, sendRoute } from './api';
 import { candidate } from './test/fixtures';
 import type { Location, SavedRouteSearch } from './types';
 
 vi.mock('./api', async importOriginal => {
   const actual = await importOriginal<typeof import('./api')>();
-  return { ...actual, generate: vi.fn(), editRoute: vi.fn(), saveRoute: vi.fn(), loadSearch: vi.fn(), previewRoute: vi.fn(), downloadGpx: vi.fn(), downloadFit: vi.fn(), sendRoute: vi.fn(), disconnect: vi.fn(), listConnections: vi.fn(), geocode: vi.fn().mockResolvedValue([]) };
+  return { ...actual, generate: vi.fn(), editRoute: vi.fn(), saveRoute: vi.fn(), loadSearch: vi.fn(), previewRoute: vi.fn(), downloadGpx: vi.fn(), downloadFit: vi.fn(), sendRoute: vi.fn(), disconnect: vi.fn(), listConnections: vi.fn(), listSent: vi.fn(), geocode: vi.fn().mockResolvedValue([]) };
 });
 vi.mock('./components/RouteMap', () => ({
   ROUTE_COLORS: ['#d3733c', '#466bc3', '#9363a9'],
@@ -35,6 +35,7 @@ beforeEach(() => {
   vi.mocked(generate).mockReset(); vi.mocked(downloadGpx).mockReset();
   vi.mocked(downloadFit).mockReset(); vi.mocked(sendRoute).mockReset(); vi.mocked(disconnect).mockReset();
   vi.mocked(listConnections).mockReset().mockResolvedValue([]);
+  vi.mocked(listSent).mockReset().mockResolvedValue([]);
   vi.mocked(previewRoute).mockReset();
   vi.mocked(loadSearch).mockReset();
   vi.mocked(editRoute).mockReset(); vi.mocked(saveRoute).mockReset();
@@ -624,6 +625,18 @@ it('sends a route to a connected Garmin account', async () => {
   await userEvent.click(screen.getAllByRole('button', { name: /^Export/ })[0]);
   expect(screen.getAllByRole('link', { name: /View in Garmin Connect/ })).toHaveLength(2);
   expect(screen.queryByRole('button', { name: /Send to Garmin/ })).not.toBeInTheDocument();
+});
+
+it('shows routes sent earlier and forgets them after disconnecting', async () => {
+  window.history.replaceState(null, '', '/routes/search-1?route=route-1');
+  vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  vi.mocked(listSent).mockResolvedValue([{ routeId: 'route-1', service: 'garmin', externalId: '7', viewUrl: 'https://connect.garmin.com/modern/course/7' }]);
+  vi.mocked(disconnect).mockResolvedValue();
+  render(<App />);
+  expect(await screen.findByRole('link', { name: /View in Garmin Connect/ })).toHaveAttribute('href', 'https://connect.garmin.com/modern/course/7');
+  await userEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+  await waitFor(() => expect(screen.queryByText(/Sent to Garmin/)).not.toBeInTheDocument());
 });
 
 it('links to Garmin when it is not connected yet', async () => {

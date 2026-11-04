@@ -14,10 +14,18 @@ internal sealed class MemoryConnectionStore : IConnectionStore
         lock (Items)
         {
             var keys = Items.Where(i => i.Key.Item2 == service && i.Value.Tokens.ExternalUserId == externalUserId).Select(i => i.Key).ToArray();
-            foreach (var key in keys) Items.Remove(key);
+            foreach (var key in keys) { Items.Remove(key); SentItems.RemoveAll(s => s.Session == key.Item1 && s.Record.Service == service); }
             return keys.Length;
         }
     }
+    public readonly List<(Guid Session, SentRouteRecord Record)> SentItems = [];
+    public void RecordSent(Guid sessionId, SentRouteRecord sent)
+    {
+        lock (Items) { SentItems.RemoveAll(s => s.Session == sessionId && s.Record.Service == sent.Service && s.Record.RouteId == sent.RouteId); SentItems.Add((sessionId, sent)); }
+    }
+    public IReadOnlyList<SentRouteRecord> ListSent(Guid sessionId) { lock (Items) return SentItems.Where(s => s.Session == sessionId).Select(s => s.Record).ToArray(); }
+    public void MoveSent(Guid from, Guid to) { lock (Items) for (var i = 0; i < SentItems.Count; i++) if (SentItems[i].Session == from) SentItems[i] = (to, SentItems[i].Record); }
+    public void DeleteSent(Guid sessionId, ServiceKind service) { lock (Items) SentItems.RemoveAll(s => s.Session == sessionId && s.Record.Service == service); }
 }
 
 internal sealed class FakeConnector : IServiceConnector
@@ -50,7 +58,7 @@ internal sealed class FakeDestination : IRouteDestination
     public ServiceKind Service => ServiceKind.Garmin;
     public bool Reject { get; set; }
     public readonly List<(RouteCandidate Route, Activity Activity, ServiceTokens Tokens)> Sent = [];
-    public Task<SentRoute> SendAsync(RouteCandidate route, Activity activity, ServiceTokens tokens, CancellationToken ct)
+    public Task<SentRoute> SendAsync(RouteCandidate route, Activity activity, Uri? routeUrl, ServiceTokens tokens, CancellationToken ct)
     {
         if (Reject) throw new ProviderException(ProviderFailure.Unauthorized, "token revoked");
         Sent.Add((route, activity, tokens));

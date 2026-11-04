@@ -4,7 +4,7 @@ import { LocationSearch } from './components/LocationSearch';
 import RouteMap, { ROUTE_COLORS, type MapMarkerTarget, type MapPadding } from './components/RouteMap';
 import type { Activity, Location, Place, RouteCandidate, ServiceKind } from './types';
 import { ConnectionsPanel } from './components/ConnectionsPanel';
-import { ExportMenu, SentNotes, type SentViews } from './components/ExportMenu';
+import { ExportMenu, SentNotes } from './components/ExportMenu';
 import { readConnectReturn, rememberSendIntent, takeSendIntent } from './connectReturn';
 import { useConnections } from './useConnections';
 import { insertionIndex as findInsertionIndex } from './routeEditing';
@@ -172,9 +172,8 @@ function Planner() {
   const [notice, setNotice] = useState<Message | null>(null);
   const [locating, setLocating] = useState(false);
   const [exporting, setExporting] = useState<{ id: string; format: 'gpx' | 'fit' } | null>(null);
-  const { connections, setConnected, disconnect } = useConnections();
+  const { connections, setConnected, disconnect, sent, markSent } = useConnections();
   const [sending, setSending] = useState<string | null>(null);
-  const [sent, setSent] = useState<Record<string, SentViews>>({});
   // Read before the saved-search restore rewrites the URL.
   const [connectReturn, setConnectReturn] = useState(() => readConnectReturn(window.location.search));
   const [restoring, setRestoring] = useState(false);
@@ -587,7 +586,7 @@ function Planner() {
     try {
       const result = await sendRoute(candidate.id, service, controller.signal);
       setConnected(service, true);
-      setSent(all => ({ ...all, [candidate.id]: { ...all[candidate.id], [service]: result.viewUrl } }));
+      markSent(candidate.id, service, result.viewUrl);
     } catch (ex) {
       if (ex instanceof ApiError && ex.problem.status === 401) setConnected(service, false);
       setError(failureMessages(ex, 'error.sendFailed', number));

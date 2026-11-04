@@ -34,6 +34,48 @@ public sealed class ConnectionStoreTests
         Assert.NotNull(store.Get(c, ServiceKind.Garmin));
     }
 
+    private static SentRouteRecord Sent(Guid route, string course = "1") =>
+        new(route, ServiceKind.Garmin, new(course, new($"https://connect.garmin.com/modern/course/{course}")), DateTimeOffset.UtcNow);
+
+    [Fact]
+    public void RemembersSentRoutesPerSessionAndKeepsTheLatestSend()
+    {
+        using var store = new SqliteConnectionStore(new ResultStorageOptions { DatabasePath = ":memory:" }, new EphemeralDataProtectionProvider());
+        var (session, other, route) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        store.RecordSent(session, Sent(route, "1"));
+        store.RecordSent(session, Sent(route, "2"));
+        var sent = Assert.Single(store.ListSent(session));
+        Assert.Equal(route, sent.RouteId);
+        Assert.Equal("2", sent.Sent.ExternalId);
+        Assert.Equal("https://connect.garmin.com/modern/course/2", sent.Sent.ViewUrl!.ToString());
+        Assert.Empty(store.ListSent(other));
+    }
+
+    [Fact]
+    public void SentRoutesMoveWithTheSessionAndGoWithTheConnection()
+    {
+        using var store = new SqliteConnectionStore(new ResultStorageOptions { DatabasePath = ":memory:" }, new EphemeralDataProtectionProvider());
+        var (session, rotated) = (Guid.NewGuid(), Guid.NewGuid());
+        store.RecordSent(session, Sent(Guid.NewGuid()));
+        store.MoveSent(session, rotated);
+        Assert.Empty(store.ListSent(session));
+        Assert.Single(store.ListSent(rotated));
+        store.DeleteSent(rotated, ServiceKind.Garmin);
+        Assert.Empty(store.ListSent(rotated));
+    }
+
+    [Fact]
+    public void DeregistrationAlsoForgetsWhatWasSent()
+    {
+        using var store = new SqliteConnectionStore(new ResultStorageOptions { DatabasePath = ":memory:" }, new EphemeralDataProtectionProvider());
+        var (gone, kept) = (Guid.NewGuid(), Guid.NewGuid());
+        store.Upsert(Connection(gone)); store.Upsert(Connection(kept, "someone-else"));
+        store.RecordSent(gone, Sent(Guid.NewGuid())); store.RecordSent(kept, Sent(Guid.NewGuid()));
+        store.DeleteByExternalUser(ServiceKind.Garmin, "garmin-user");
+        Assert.Empty(store.ListSent(gone));
+        Assert.Single(store.ListSent(kept));
+    }
+
     [Fact]
     public void StoresNoPlainTokensOrUserIds()
     {

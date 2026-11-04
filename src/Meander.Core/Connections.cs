@@ -8,6 +8,8 @@ public enum ServiceKind { Garmin }
 public sealed record ServiceTokens(string AccessToken, string? RefreshToken, DateTimeOffset ExpiresAt, string? ExternalUserId);
 public sealed record ServiceConnection(Guid SessionId, ServiceKind Service, ServiceTokens Tokens, DateTimeOffset ConnectedAt);
 public sealed record SentRoute(string ExternalId, Uri? ViewUrl);
+// Kept per session so a sent route still links to the service after a reload.
+public sealed record SentRouteRecord(Guid RouteId, ServiceKind Service, SentRoute Sent, DateTimeOffset SentAt);
 
 public interface IConnectionStore
 {
@@ -15,7 +17,12 @@ public interface IConnectionStore
     IReadOnlyList<ServiceConnection> List(Guid sessionId);
     void Upsert(ServiceConnection connection);
     void Delete(Guid sessionId, ServiceKind service);
+    // Also forgets what those sessions sent: the service no longer knows them.
     int DeleteByExternalUser(ServiceKind service, string externalUserId);
+    void RecordSent(Guid sessionId, SentRouteRecord sent);
+    IReadOnlyList<SentRouteRecord> ListSent(Guid sessionId);
+    void MoveSent(Guid fromSessionId, Guid toSessionId);
+    void DeleteSent(Guid sessionId, ServiceKind service);
 }
 
 public interface IServiceConnector
@@ -32,7 +39,8 @@ public interface IServiceConnector
 public interface IRouteDestination
 {
     ServiceKind Service { get; }
-    Task<SentRoute> SendAsync(RouteCandidate route, Activity activity, ServiceTokens tokens, CancellationToken ct);
+    // routeUrl opens the route in Meander again; null when the route was never saved.
+    Task<SentRoute> SendAsync(RouteCandidate route, Activity activity, Uri? routeUrl, ServiceTokens tokens, CancellationToken ct);
 }
 
 public sealed class ConnectionService(IConnectionStore store, IEnumerable<IServiceConnector> connectors, TimeProvider clock)
@@ -82,6 +90,7 @@ public sealed class ConnectionService(IConnectionStore store, IEnumerable<IServi
     {
         var connection = store.Get(sessionId, service);
         if (connection is not null) store.Delete(sessionId, service);
+        store.DeleteSent(sessionId, service);
         return connection;
     }
 

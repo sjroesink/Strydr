@@ -247,7 +247,10 @@ test('connect Garmin and send the chosen route', async ({ page, request }) => {
   await expect(page.getByText('Garmin connected')).toBeVisible();
   expect(page.url()).not.toContain('connected=');
   expect(await courseCount()).toBe(before + 1);
+  await page.reload();
+  await expect(page.locator('.route-card.selected').getByRole('link', { name: /View in Garmin Connect/ })).toBeVisible();
   await page.getByRole('button', { name: 'Disconnect' }).click();
+  await expect(page.locator('.route-sent')).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Connect Garmin' })).toBeVisible();
 });
 

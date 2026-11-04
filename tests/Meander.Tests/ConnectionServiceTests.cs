@@ -57,7 +57,7 @@ public sealed class ConnectionServiceTests
         Connect(TimeSpan.FromHours(1));
         var destination = new FakeDestination { Reject = true };
         await Assert.ThrowsAsync<ProviderException>(() => Service().UseAsync(Session, ServiceKind.Garmin,
-            tokens => destination.SendAsync(Fixtures.Candidate(), Activity.Running, tokens, default), default));
+            tokens => destination.SendAsync(Fixtures.Candidate(), Activity.Running, null, tokens, default), default));
         Assert.Null(store.Get(Session, ServiceKind.Garmin));
     }
 

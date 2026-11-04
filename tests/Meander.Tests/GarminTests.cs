@@ -96,6 +96,36 @@ public sealed class GarminTests
     }
 
     [Fact]
+    public async Task SentCoursesLinkBackToMeanderAndAreRememberedForTheSession()
+    {
+        await using var app = App();
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Connect(client);
+        using var generated = await client.PostAsJsonAsync("/api/routes/generate",
+            new { start = new { latitude = 52.09, longitude = 5.12 }, targetDistanceKm = 5 });
+        var first = (await generated.Content.ReadFromJsonAsync<JsonElement>())[0];
+        var (id, searchId) = (first.GetProperty("id").GetString(), first.GetProperty("searchId").GetString());
+        using var sent = await client.PostAsync($"/api/routes/{id}/send/garmin", null);
+        Assert.Equal(HttpStatusCode.OK, sent.StatusCode);
+        var payload = JsonDocument.Parse(garmin.Requests.Single(r => r.Url.EndsWith("/course")).Body).RootElement;
+        Assert.Equal($"Meander route: http://localhost/routes/{searchId}?route={id}", payload.GetProperty("description").GetString());
+
+        // Connecting again rotates the session; what was sent moves along with it.
+        await Connect(client);
+        var remembered = Assert.Single((await client.GetFromJsonAsync<JsonElement>("/api/routes/sent")).EnumerateArray());
+        Assert.Equal(id, remembered.GetProperty("routeId").GetString());
+        Assert.Equal("garmin", remembered.GetProperty("service").GetString());
+        Assert.Equal("987654", remembered.GetProperty("externalId").GetString());
+        Assert.Equal("https://connect.garmin.com/modern/course/987654", remembered.GetProperty("viewUrl").GetString());
+
+        using var stranger = app.CreateClient();
+        Assert.Empty((await stranger.GetFromJsonAsync<JsonElement>("/api/routes/sent")).EnumerateArray());
+
+        using var disconnected = await client.DeleteAsync("/api/connections/garmin");
+        Assert.Empty((await client.GetFromJsonAsync<JsonElement>("/api/routes/sent")).EnumerateArray());
+    }
+
+    [Fact]
     public async Task RejectedCourseTokensAskForAReconnect()
     {
         garmin.CourseStatus = HttpStatusCode.Unauthorized;
@@ -247,7 +277,7 @@ public sealed class GarminTests
         garmin.CourseErrorBody = "{\"errorMessage\":\"activityType WALKING is not supported\"}\n" + new string('x', 1000);
         var destination = new GarminCourseDestination(new HttpClient(garmin), new GarminOptions { ClientId = "c", ClientSecret = "s" });
         var failure = await Assert.ThrowsAsync<ProviderException>(() =>
-            destination.SendAsync(Fixtures.Candidate(), Activity.Walking, new("secret-token", null, DateTimeOffset.UtcNow.AddHours(1), "u"), default));
+            destination.SendAsync(Fixtures.Candidate(), Activity.Walking, null, new("secret-token", null, DateTimeOffset.UtcNow.AddHours(1), "u"), default));
         Assert.Contains("(400)", failure.Message);
         Assert.Contains("activityType WALKING is not supported", failure.Message);
         Assert.DoesNotContain("secret-token", failure.Message);
@@ -270,8 +300,11 @@ public sealed class GarminTests
     [Fact]
     public void MapsRoutesToGarminCourses()
     {
-        var course = GarminCourseMapper.Map(Fixtures.Candidate(), Activity.Walking);
+        var course = GarminCourseMapper.Map(Fixtures.Candidate(), Activity.Walking, null);
         Assert.Equal("Meander 2.0 km", course.CourseName);
+        Assert.Equal("Planned with Meander", course.Description);
+        Assert.Equal("Meander route: https://meander.test/routes/s?route=r",
+            GarminCourseMapper.Map(Fixtures.Candidate(), Activity.Walking, new("https://meander.test/routes/s?route=r")).Description);
         Assert.Equal("WALKING", course.ActivityType);
         Assert.Equal("WGS84", course.CoordinateSystem);
         Assert.Equal(2000, course.Distance);
@@ -286,7 +319,7 @@ public sealed class GarminTests
     {
         var points = new[] { 10.0, 30, 20 }.Select((e, i) => Geo.Destination(Fixtures.Start, 90, i * .5) with { ElevationM = e });
         var route = Fixtures.Candidate() with { Geometry = LineString.From(points.ToArray()), ElevationGainM = 20 };
-        var course = GarminCourseMapper.Map(route, Activity.Running);
+        var course = GarminCourseMapper.Map(route, Activity.Running, null);
         Assert.Equal(20, course.ElevationGain);
         Assert.Equal(10, course.ElevationLoss);
     }
@@ -294,7 +327,7 @@ public sealed class GarminTests
     [Fact]
     public void GarminGetsZeroElevationWhenTheRouteHasNone()
     {
-        var course = GarminCourseMapper.Map(Fixtures.Candidate() with { ElevationGainM = null }, Activity.Running);
+        var course = GarminCourseMapper.Map(Fixtures.Candidate() with { ElevationGainM = null }, Activity.Running, null);
         Assert.Equal(0, course.ElevationGain);
         Assert.Equal(0, course.ElevationLoss);
     }
