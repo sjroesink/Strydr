@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Meander.Core;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace Meander.Infrastructure;
 
@@ -12,14 +13,18 @@ public sealed class WoodlandOptions
     public double MaxSearchRadiusKm { get; set; } = 12;
     public int TimeoutSeconds { get; set; } = 10;
     public int CacheHours { get; set; } = 12;
+    // Response cap; Overpass needs several times this much query memory (maxsize) to build it.
+    // Dense towns with a large search radius exceed 8 MB, so a private instance can allow more.
+    public int MaxResponseMegabytes { get; set; } = 8;
 }
 
 // Local development uses one cached area query, not requests per route or map movement.
 // The provider is replaceable by a local OSM extract/service for production hosting.
-public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, WoodlandOptions options, TimeProvider clock)
-    : IWoodlandProvider, IDisposable
+public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, WoodlandOptions options, TimeProvider clock,
+    ILogger<OverpassWoodlandProvider>? logger = null) : IWoodlandProvider, IDisposable
 {
-    private readonly MemoryCache cache = new(new MemoryCacheOptions { SizeLimit = 32 * 1024 * 1024 });
+    // Entries are sized at four times their JSON length; keep room for a few maximum-size areas.
+    private readonly MemoryCache cache = new(new MemoryCacheOptions { SizeLimit = Math.Max(32, options.MaxResponseMegabytes * 16) * 1024L * 1024 });
     private readonly SemaphoreSlim gate = new(1);
     private DateTimeOffset lastRequest = DateTimeOffset.MinValue;
     private sealed record Cached(WoodlandMap? Map);
@@ -44,13 +49,13 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
             lastRequest = clock.GetUtcNow();
             using var content = new FormUrlEncodedContent(new Dictionary<string, string>
             {
-                ["data"] = Query(queryCenter, radius, Math.Max(1, options.TimeoutSeconds - 2))
+                ["data"] = Query(queryCenter, radius, Math.Max(1, options.TimeoutSeconds - 2), options.MaxResponseMegabytes * 4L * 1024 * 1024)
             });
             using var response = await clients.CreateClient("woodland").PostAsync(options.Url, content, deadline.Token);
             response.EnsureSuccessStatusCode();
             using var json = await response.Content.ReadFromJsonAsync<JsonDocument>(deadline.Token)
                 ?? throw new JsonException("Empty woodland response.");
-            var map = Parse(queryCenter, json.RootElement);
+            var map = Parse(queryCenter, json.RootElement, options.MaxResponseMegabytes * 2500);
             cache.Set(key, new Cached(map), new MemoryCacheEntryOptions()
                 .SetAbsoluteExpiration(TimeSpan.FromHours(options.CacheHours))
                 .SetSize(Math.Max(4096, json.RootElement.GetRawText().Length * 4L)));
@@ -59,19 +64,20 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
         catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or OperationCanceledException or KeyNotFoundException or FormatException)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            logger?.LogWarning("Woodland lookup failed: {FailureType}: {Message}", ex.GetType().Name, ex.Message);
             cache.Set(key, new Cached(null), new MemoryCacheEntryOptions().SetSize(128).SetAbsoluteExpiration(TimeSpan.FromMinutes(2)));
             return null;
         }
         finally { if (entered) gate.Release(); }
     }
 
-    private static string Query(Location center, double radiusKm, int timeout)
+    private static string Query(Location center, double radiusKm, int timeout, long maxSizeBytes)
     {
         var lat = center.Latitude.ToString("R", CultureInfo.InvariantCulture);
         var lon = center.Longitude.ToString("R", CultureInfo.InvariantCulture);
         var around = $"(around:{(radiusKm * 1000).ToString("F0", CultureInfo.InvariantCulture)},{lat},{lon})";
         return $"""
-            [out:json][timeout:{timeout}][maxsize:16777216];
+            [out:json][timeout:{timeout}][maxsize:{maxSizeBytes}];
             is_in({lat},{lon})->.here;
             (
               wr{around}[natural=wood]; wr{around}[landuse=forest];
@@ -83,14 +89,15 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
             """;
     }
 
-    public static WoodlandMap Parse(Location center, JsonElement root)
+    // The element limit scales with the response cap: 20,000 elements for the default 8 MB.
+    public static WoodlandMap Parse(Location center, JsonElement root, int maxElements = 20000)
     {
         // Overpass can return HTTP 200 with an incomplete result and a timeout remark.
         if (root.TryGetProperty("remark", out _)) throw new JsonException("Incomplete woodland response.");
         var polygons = new List<WoodlandPolygon>();
         var paths = new List<Location>();
         var elements = root.GetProperty("elements");
-        if (elements.GetArrayLength() > 20000) throw new JsonException("Woodland response is too large.");
+        if (elements.GetArrayLength() > maxElements) throw new JsonException("Woodland response is too large.");
         foreach (var element in elements.EnumerateArray())
         {
             if (!element.TryGetProperty("tags", out var tags)) continue;

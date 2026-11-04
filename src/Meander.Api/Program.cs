@@ -43,7 +43,7 @@ builder.Services.AddHttpClient("woodland", client =>
 {
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Meander/1.0");
     client.Timeout = Timeout.InfiniteTimeSpan;
-    client.MaxResponseContentBufferSize = 8 * 1024 * 1024;
+    client.MaxResponseContentBufferSize = woodland.MaxResponseMegabytes * 1024L * 1024;
 });
 builder.Services.AddSingleton<IWoodlandProvider, OverpassWoodlandProvider>();
 AddProviderResilience("ors", builder.Services.AddHttpClient<OrsProvider>(client =>
@@ -119,8 +119,8 @@ if (!string.IsNullOrWhiteSpace(mapData.Path))
 }
 if (!Uri.TryCreate(woodland.Url, UriKind.Absolute, out var woodlandUrl) || woodlandUrl.Scheme is not ("http" or "https") ||
     !double.IsFinite(woodland.MaxSearchRadiusKm) || woodland.MaxSearchRadiusKm is < 1 or > 20 ||
-    woodland.TimeoutSeconds is < 3 or > 20 || woodland.CacheHours is < 1 or > 168)
-    throw new InvalidOperationException("Invalid Woodland configuration. Check URL, radius (1–20 km), timeout (3–20 s), and cache hours (1–168).");
+    woodland.TimeoutSeconds is < 3 or > 20 || woodland.CacheHours is < 1 or > 168 || woodland.MaxResponseMegabytes is < 1 or > 128)
+    throw new InvalidOperationException("Invalid Woodland configuration. Check URL, radius (1–20 km), timeout (3–20 s), cache hours (1–168), and maximum response size (1–128 MB).");
 if (storage.DatabasePath != ":memory:")
     storage.DatabasePath = Path.GetFullPath(storage.DatabasePath, app.Environment.ContentRootPath);
 ConfigurationChecks.Validate(ors, generation);

@@ -64,8 +64,9 @@ Both keys are optional replacements for hosted services. Keyless mode uses three
 | ORS routing and snapping | Self-hosted [openrouteservice](https://giscience.github.io/openrouteservice/) container (`foot-walking` only) | `Ors:BaseUrl` points to the container; no key or `Authorization` header |
 | ORS geocoding (autocomplete) | [Photon](https://github.com/komoot/photon) container with the Netherlands index | `Geocoding:Provider=Photon`; self-hosted ORS has no geocoder |
 | MapTiler basemap | [Protomaps](https://protomaps.com/) PMTiles extract, glyphs and sprites served by the API at `/map` | `MapData:Path` on the API, `VITE_PMTILES_URL` in the frontend |
+| Public Overpass (woodland lookup, keyless but often busy) | [Overpass API](https://github.com/wiktorn/Overpass-API) container with a Netherlands import | `Woodland:Url` points to the container |
 
-Needs roughly 6 GB RAM for the containers (ORS uses up to 4 GB while building) and about 12 GB disk (1.3 GB OSM extract, ~2 GB PMTiles, ~4 GB Photon index plus graphs and elevation cache; the Photon download needs extra temporary space).
+Needs roughly 6 GB RAM for the containers (ORS uses up to 4 GB while building) and about 21 GB disk (1.3 GB OSM extract, ~2 GB PMTiles, ~4 GB Photon index, ~9 GB Overpass database plus graphs and elevation cache; the Photon and Overpass imports need extra temporary space). The Overpass import took about 45 minutes on a desktop machine.
 
 1. Download the data into the ignored `data/` folder (Docker required for the `pmtiles` CLI):
 
@@ -81,7 +82,7 @@ Needs roughly 6 GB RAM for the containers (ORS uses up to 4 GB while building) a
 
    If you used the Compose setup before this feature, add `--renew-anon-volumes` once: the existing `web` container keeps its old `node_modules` volume, which lacks the `pmtiles` packages.
 
-   On first start, ORS builds its routing graph (about 5–20 minutes, depending on the machine) and Photon downloads its Netherlands index. Generation returns 503 until ORS reports healthy (`docker compose ps`). Graphs, elevation data and the Photon index persist in named volumes. After downloading a newer OSM extract, remove the `ors-graphs` volume so the graph is rebuilt.
+   On first start, ORS builds its routing graph (about 5–20 minutes, depending on the machine), Photon downloads its Netherlands index, and Overpass downloads, converts and imports the Netherlands and then builds its areas (one to several hours). Until Overpass is healthy, green searches return routes with a `woodlandUnavailable` warning. Generation returns 503 until ORS reports healthy (`docker compose ps`). Graphs, elevation data and the Photon index persist in named volumes. After downloading a newer OSM extract, remove the `ors-graphs` volume so the graph is rebuilt.
 
 Self-hosted ORS has no green index, so the override sets `Ors:SupportsGreen=false`. **Prefer green** still works through the Overpass woodland lookup; only ORS's green weighting for approaches and the legacy `greenScore` are unavailable. The override raises the ORS request budgets because a local instance has no quota.
 
@@ -118,6 +119,7 @@ Backend defaults live in `src/Meander.Api/appsettings.json`; ignored `appsetting
 | `Woodland:Url` | `https://overpass-api.de/api/interpreter` | OSM woodland/path lookup; replace with a hosted or local Overpass endpoint |
 | `Woodland:MaxSearchRadiusKm` | 12 | Maximum woodland search radius; cached queries include a 1 km centre-rounding margin |
 | `Woodland:TimeoutSeconds` | 10 | Time budget for optional woodland lookup, including queued requests |
+| `Woodland:MaxResponseMegabytes` | 8 | Woodland response cap (query memory and element limits scale with it); `compose.local.yaml` uses 32 because dense towns exceed 8 MB at large radii |
 | `Woodland:CacheHours` | 12 | Lifetime of successful area lookups in a separate 32 MiB memory cache |
 | `RateLimiting:GeneratePerMinute` | 3 | Per-IP incoming generation limit |
 | `RateLimiting:ConcurrentGenerations` | 2 | Process-wide generation limit; rejected requests are not queued |
@@ -206,6 +208,8 @@ Snap distances are measured from coordinates rather than trusting optional provi
 - `POST /api/routes/save` accepts a `RouteRequest` with `drawnRouteId`, checks the draft's endpoints/activity/preferences and saves it as one candidate. It preserves current distance/radius status and warnings and does not call ORS. The saved request has `isEditedRoute: true`; the last stored drawing point is the finish, represented by A/B rather than a duplicate numbered marker in the editor.
 
 Use **Download drawn GPX** to export that section directly (click back at your start if you are drawing a complete loop). Or set a target distance and choose **Find my routes** to keep the exact preview geometry as a fixed prefix and automatically complete the rest to your selected end, or back to the start. Explicitly clicked out-and-back legs are preserved; automatic cleanup applies only to the generated continuation. This is also how to steer a route into a particular forest: the green background map by itself does not select a search area.
+
+With **Prefer green** or **Prefer unpaved**, the last drawn point (when it is not back at the start) marks the area to explore. If there is at least 0.6 km of distance to spare beyond the shortest way home, most of the search budget goes there: forest circuits through mapped woodland whose paths are within a third of the spare distance (at least 1 km) of that point, or, without nearby woodland data, loops beyond the point on the side away from home. Two general detours remain as alternatives. Continuations that stay near the drawn point rank ahead of similar detours elsewhere. A forest that is closer to home than to the drawn point is treated as part of the way back, not as the target.
 
 `POST /api/routes/preview` accepts `{ start, points: [{ latitude, longitude }, ...], activity, preferGreen, preferUnpaved }` and returns a cached `RouteCandidate` with `snappedPoints`. Its ID may be sent as `drawnRouteId` on the normal generate request. The fixed route must match the requested start, activity, and scenery preferences. The cache stores its complete per-edge quality data so completion can preserve geometry and calculate whole-route distance and quality. Expired or mismatched drafts return 422 with an instruction to refresh. The minimum possible completion distance includes the entire fixed prefix plus the shortest connection. A drawn point outside the requested radius is rejected.
 

@@ -68,6 +68,30 @@ public sealed class WoodlandTests
         Assert.Empty(map.Targets(Fixtures.Start, Fixtures.Start, .6, Fixtures.Start, null));
     }
 
+    // A forest block east of the start between eastFrom and eastTo km, 1 km tall, with a path grid.
+    public static WoodlandPolygon ForestBlock(double eastFrom, double eastTo, out Location[] paths)
+    {
+        Location At(double east, double north) => Geo.Destination(Geo.Destination(Fixtures.Start, 90, east), 0, north);
+        var columns = (int)Math.Round((eastTo - eastFrom) / .2);
+        paths = Enumerable.Range(0, columns).SelectMany(x => Enumerable.Range(0, 5)
+            .Select(y => At(eastFrom + .1 + x * .2, -.4 + y * .2))).ToArray();
+        return new([At(eastFrom, -.5), At(eastTo, -.5), At(eastTo, .5), At(eastFrom, .5), At(eastFrom, -.5)], []);
+    }
+
+    [Fact]
+    public void TargetsNearPreferTheForestAtTheDrawnPointOverACheaperOneOnTheWayHome()
+    {
+        var midway = ForestBlock(.6, 1.4, out var midwayPaths);
+        var beyond = ForestBlock(3.2, 4.2, out var beyondPaths);
+        var map = new WoodlandMap(Fixtures.Start, [midway, beyond], [.. midwayPaths, .. beyondPaths]);
+        var focus = Geo.Destination(Fixtures.Start, 90, 3);
+        var general = map.Targets(focus, Fixtures.Start, 10, Fixtures.Start, null);
+        Assert.Contains(general, t => t.Points.All(p => Geo.DistanceKm(Fixtures.Start, p) < 1.5));
+        var near = map.TargetsNear(focus, Fixtures.Start, 10, Fixtures.Start, null, focusKm: 1);
+        var target = Assert.Single(near);
+        Assert.All(target.Points, p => Assert.True(Geo.DistanceKm(Fixtures.Start, p) > 3.1));
+    }
+
     [Fact]
     public async Task ForestPreferenceDirectsSearchIntoWoodlandAndOutranksHighUrbanGreenIndex()
     {

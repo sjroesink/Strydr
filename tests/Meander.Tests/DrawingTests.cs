@@ -77,6 +77,62 @@ public sealed class DrawingTests
         Assert.All(routes, route => Assert.Equal(preview.Geometry.Coordinates[1], route.Geometry.Coordinates[1]));
     }
 
+    // Continuation queries (after the preview) that loop beyond the drawn point, away from home.
+    private IReadOnlyList<ViaPointsQuery> LoopsBeyond(Location drawn) => provider.ViaQueries.Skip(1)
+        .Where(q => !q.Shortest && q.Points.Skip(1).SkipLast(1).All(p => p.Longitude > drawn.Longitude)).ToArray();
+
+    [Fact]
+    public async Task GreenDrawnPointExploresTheForestAroundItInsteadOfDetouringHome()
+    {
+        // A cheaper forest on the direct way home must not pull the search away from the drawn point.
+        var midway = WoodlandTests.ForestBlock(.6, 1.4, out var midwayPaths);
+        var beyond = WoodlandTests.ForestBlock(3.2, 4.2, out var beyondPaths);
+        var map = new WoodlandMap(Fixtures.Start, [midway, beyond], [.. midwayPaths, .. beyondPaths]);
+        var generator = new RouteGenerator(provider, store, new(), clock, new FixedWoodland(map));
+        var drawn = Point(90, 3);
+        var preview = await generator.PreviewAsync(new(Fixtures.Start, [drawn], PreferGreen: true, PreferUnpaved: true), default);
+        var routes = await generator.GenerateAsync(Fixtures.Loop(14) with { DrawnRouteId = preview.Id, PreferGreen = true, PreferUnpaved = true }, default);
+        Assert.InRange(provider.ViaQueries.Count - 1, 2, 9);
+        // Forest circuits consist only of woodland path points between the drawn point and home.
+        var forestQueries = provider.ViaQueries.Skip(1).Where(q => q.Points.Count > 2 && q.Points.Skip(1).SkipLast(1).All(map.Contains)).ToArray();
+        Assert.Equal(6, forestQueries.Length);
+        Assert.All(forestQueries, q =>
+        {
+            Assert.Equal(drawn, q.Points[0]);
+            Assert.All(q.Points.Skip(1).SkipLast(1), p => Assert.True(Geo.DistanceKm(Fixtures.Start, p) > 3.1));
+        });
+        Assert.True(routes[0].WoodlandPercent > 0);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task WithoutWoodlandDataADrawnPointStillGetsLoopsAroundIt(bool green, bool unpaved)
+    {
+        var generator = new RouteGenerator(provider, store, new(), clock, new FixedWoodland(null));
+        var drawn = Point(90, 3);
+        var preview = await generator.PreviewAsync(new(Fixtures.Start, [drawn], PreferGreen: green, PreferUnpaved: unpaved), default);
+        var routes = await generator.GenerateAsync(Fixtures.Loop(14) with { DrawnRouteId = preview.Id, PreferGreen = green, PreferUnpaved = unpaved }, default);
+        Assert.NotEmpty(routes);
+        Assert.InRange(provider.ViaQueries.Count - 1, 2, 9);
+        Assert.InRange(LoopsBeyond(drawn).Count, 2, 6);
+        // The best candidate stays near the drawn point rather than detouring elsewhere.
+        Assert.Contains(routes[0].Geometry.Coordinates.Skip(preview.Geometry.Coordinates.Length), c => c[0] > drawn.Longitude);
+    }
+
+    [Theory]
+    [InlineData(false, 14)]
+    [InlineData(true, 7.4)]
+    public async Task DrawnPointWithoutPreferenceOrRoomKeepsTheDirectDetourSearch(bool green, double target)
+    {
+        var generator = new RouteGenerator(provider, store, new(), clock, new FixedWoodland(null));
+        var drawn = Point(90, 3);
+        var preview = await generator.PreviewAsync(new(Fixtures.Start, [drawn], PreferGreen: green), default);
+        await generator.GenerateAsync(Fixtures.Loop(target) with { DrawnRouteId = preview.Id, PreferGreen = green }, default);
+        Assert.Empty(LoopsBeyond(drawn));
+        Assert.InRange(provider.ViaQueries.Count - 1, 2, 9);
+    }
+
     [Fact]
     public async Task RejectsMissingExpiredOrChangedDrafts()
     {

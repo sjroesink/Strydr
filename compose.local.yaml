@@ -25,6 +25,33 @@ services:
       interval: 30s
       timeout: 5s
       start_period: 30m
+  # Woodland polygons and paths for "prefer green" (replaces the public Overpass server).
+  # The first start imports the Netherlands and builds areas (roughly an hour); woodland
+  # lookups report woodlandUnavailable until it is healthy.
+  overpass:
+    image: wiktorn/overpass-api:v0.7.62.11
+    # A fresh /db volume is the overpass user's home (mode 700), but queries run through
+    # fcgiwrap as the nginx user and fail with "Permission denied" unless it can enter /db.
+    entrypoint: ["/bin/sh", "-c", "chmod 755 /db && exec /docker-entrypoint.sh /app/docker-entrypoint.sh"]
+    environment:
+      OVERPASS_MODE: init
+      OVERPASS_META: "no"
+      OVERPASS_COMPRESSION: gz
+      OVERPASS_PLANET_URL: https://download.geofabrik.de/europe/netherlands-latest.osm.pbf
+      OVERPASS_PLANET_PREPROCESS: mv /db/planet.osm.bz2 /db/planet.osm.pbf && osmium cat -o /db/planet.osm.bz2 /db/planet.osm.pbf && rm /db/planet.osm.pbf
+      # The woodland query uses is_in/pivot, which need areas.
+      OVERPASS_USE_AREAS: "true"
+      OVERPASS_STOP_AFTER_INIT: "false"
+      OVERPASS_ALLOW_DUPLICATE_QUERIES: "yes"
+      OVERPASS_MAX_TIMEOUT: 60s
+    volumes:
+      - overpass-db:/db
+    healthcheck:
+      # Overpass reports query errors as HTTP 200 HTML, so require a JSON result.
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost/api/interpreter?data=%5Bout:json%5D;node(1);out;' | grep -q '\"elements\"' || exit 1"]
+      interval: 60s
+      timeout: 10s
+      start_period: 3h
   photon:
     image: rtuszik/photon-docker:2.4.0
     environment:
@@ -43,11 +70,16 @@ services:
       Geocoding__Provider: Photon
       Photon__BaseUrl: http://photon:2322/
       MapData__Path: /app/map
+      Woodland__Url: http://overpass/api/interpreter
+      Woodland__TimeoutSeconds: "15"
+      # A private instance can return whole town areas (~10 MB around Hengelo at an 8 km radius).
+      Woodland__MaxResponseMegabytes: "32"
     volumes:
       - ./data/map:/app/map:ro
     depends_on:
       - ors
       - photon
+      - overpass
   web:
     environment:
       VITE_PMTILES_URL: /map/netherlands.pmtiles
@@ -55,3 +87,4 @@ volumes:
   ors-graphs:
   ors-elevation:
   photon-data:
+  overpass-db:

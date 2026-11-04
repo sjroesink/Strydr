@@ -52,6 +52,23 @@ public static class Geo
 
     public static Location Inside(Location point, Location center, double radiusKm) =>
         DistanceKm(center, point) <= radiusKm ? point : Destination(center, Bearing(center, point), radiusKm);
+
+    // Length-weighted share of a line that stays within radiusKm of center.
+    public static double ShareWithin(IReadOnlyList<Location> points, Location center, double radiusKm)
+    {
+        double total = 0, near = 0;
+        for (var i = 1; i < points.Count; i++)
+        {
+            var length = DistanceKm(points[i - 1], points[i]);
+            var steps = Math.Max(1, (int)Math.Ceiling(length / .025));
+            for (var s = 0; s < steps; s++)
+            {
+                if (DistanceKm(center, Interpolate(points[i - 1], points[i], (s + .5) / steps)) <= radiusKm) near += length / steps;
+                total += length / steps;
+            }
+        }
+        return total > 0 ? near / total : 0;
+    }
 }
 
 // Sampled segment midpoints and lengths avoid dependence on provider vertex density.

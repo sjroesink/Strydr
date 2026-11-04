@@ -88,6 +88,8 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
         EndpointInfo start;
         EndpointInfo end;
         WoodlandMap? woodland = null;
+        // Set when the continuation explores the area around the last drawn point.
+        (Location Point, double RadiusKm, int PrefixVertices)? focus = null;
 
         async Task<RouteResult?> Attempt(Func<Task<RouteResult>> call)
         {
@@ -120,9 +122,12 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
             end = isLoop && draft is not null ? start : MakeEndpoint(requestedEnd, snappedEnd);
             var searchStart = draft?.Route.Geometry[^1] ?? start.Snapped;
             var completionIsLoop = Geo.DistanceKm(searchStart, end.Snapped) < .000001;
+            // A drawn point combined with a scenery preference marks the area the user wants to
+            // explore: the continuation should spend its distance there before heading home.
+            var exploreDrawn = draft is not null && !completionIsLoop && (request.PreferGreen || request.PreferUnpaved);
             if (request.PreferGreen && woodlands is not null)
             {
-                woodland = await woodlands.FindAsync(Geo.Interpolate(searchStart, end.Snapped, .5),
+                woodland = await woodlands.FindAsync(exploreDrawn ? searchStart : Geo.Interpolate(searchStart, end.Snapped, .5),
                     distanceRange.MaxKm / 2, ct);
                 if (woodland is null)
                     warnings.Add(new("woodlandUnavailable", "Could not look up nearby woodland. These routes may not follow your woodland preference. Try again later."));
@@ -228,24 +233,19 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
                             : "The drawn section plus the shortest connection is longer than the requested route. Increase the distance or remove a point.",
                             minimumDistanceKm: baseline.DistanceKm);
 
-                    async Task SearchSide(int side)
+                    double SearchTarget(int side) => flexibleDistance
+                        ? side > 0 ? distanceRange.MaxKm : Math.Max(distanceRange.MinKm, baseline.DistanceKm)
+                        : request.TargetDistanceKm;
+                    Location Clamp(Location point) => request.RadiusKm is { } radius ? Geo.Inside(point, request.Start!, radius * .9) : point;
+
+                    // Grow or shrink the waypoint offset until the joined route matches the target distance.
+                    async Task SearchOffset(Func<double, Location[]> waypoints, double searchTarget, double offset, double high, int tries)
                     {
-                        var bearing = Geo.Bearing(searchStart, end.Snapped);
-                        var searchTarget = flexibleDistance
-                            ? side > 0 ? distanceRange.MaxKm : Math.Max(distanceRange.MinKm, baseline.DistanceKm)
-                            : request.TargetDistanceKm;
-                        double low = 0, high = (searchTarget - fixedDistanceKm) / 2;
-                        var offset = (searchTarget - fixedDistanceKm) / 8;
-                        for (var i = 0; i < (woodlandTargets.Count > 0 ? 1 : 4) && !ct.IsCancellationRequested; i++)
+                        double low = 0;
+                        for (var i = 0; i < tries && !ct.IsCancellationRequested; i++)
                         {
-                            var first = Geo.Destination(Geo.Interpolate(searchStart, end.Snapped, 1.0 / 3), bearing + side * 90, offset);
-                            var second = Geo.Destination(Geo.Interpolate(searchStart, end.Snapped, 2.0 / 3), bearing - side * 90, offset);
-                            if (request.RadiusKm is { } radius)
-                            {
-                                first = Geo.Inside(first, request.Start!, radius * .9);
-                                second = Geo.Inside(second, request.Start!, radius * .9);
-                            }
-                            var result = await Attempt(() => provider.ViaPointsAsync(new([searchStart, first, second, end.Snapped], request.Activity, Preferences: preferences), ct));
+                            var points = waypoints(offset);
+                            var result = await Attempt(() => provider.ViaPointsAsync(new(points, request.Activity, Preferences: preferences), ct));
                             if (result is null) { high = offset; offset = (low + high) / 2; continue; }
                             if (Math.Abs(result.DistanceKm - searchTarget) / searchTarget <= options.DistanceTolerance) break;
                             if (result.DistanceKm < searchTarget)
@@ -253,8 +253,56 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
                             else { high = offset; offset = (low + high) / 2; }
                         }
                     }
-                    if (woodlandTargets.Count > 0) await Task.WhenAll(SearchWoodland(6), SearchSide(1), SearchSide(-1));
-                    else await Task.WhenAll(SearchSide(1), SearchSide(-1));
+
+                    // General alternatives: detours to either side of the direct line home.
+                    Task SearchSide(int side, int tries)
+                    {
+                        var bearing = Geo.Bearing(searchStart, end.Snapped);
+                        var searchTarget = SearchTarget(side);
+                        return SearchOffset(offset => [searchStart,
+                            Clamp(Geo.Destination(Geo.Interpolate(searchStart, end.Snapped, 1.0 / 3), bearing + side * 90, offset)),
+                            Clamp(Geo.Destination(Geo.Interpolate(searchStart, end.Snapped, 2.0 / 3), bearing - side * 90, offset)),
+                            end.Snapped], searchTarget, (searchTarget - fixedDistanceKm) / 8, (searchTarget - fixedDistanceKm) / 2, tries);
+                    }
+
+                    // A loop beyond the drawn point, on the side away from home, before returning.
+                    // The extra distance over the shortest way home grows roughly linearly with the
+                    // loop radius, so scale the radius by the remaining error instead of bisecting.
+                    async Task SearchLocalLoop(int side, double exploreKm, int tries)
+                    {
+                        var away = Geo.Bearing(end.Snapped, searchStart);
+                        var searchTarget = SearchTarget(side);
+                        var radiusKm = exploreKm / 3.2;
+                        for (var i = 0; i < tries && !ct.IsCancellationRequested; i++)
+                        {
+                            Location[] points = [searchStart,
+                                Clamp(Geo.Destination(searchStart, away + side * 70, radiusKm)),
+                                Clamp(Geo.Destination(searchStart, away - side * 20, radiusKm)), end.Snapped];
+                            var result = await Attempt(() => provider.ViaPointsAsync(new(points, request.Activity, Preferences: preferences), ct));
+                            if (result is null) { radiusKm *= .7; continue; }
+                            if (Math.Abs(result.DistanceKm - searchTarget) / searchTarget <= options.DistanceTolerance) break;
+                            var extraKm = result.DistanceKm - baseline.DistanceKm;
+                            radiusKm = extraKm <= .05 ? radiusKm * 2
+                                : Math.Clamp(radiusKm * (searchTarget - baseline.DistanceKm) / extraKm, radiusKm * .3, radiusKm * 2.5);
+                        }
+                    }
+
+                    var exploreKm = request.TargetDistanceKm - baseline.DistanceKm;
+                    if (exploreDrawn && exploreKm >= .6)
+                    {
+                        var focusKm = Math.Max(1, exploreKm / 3);
+                        focus = (searchStart, Math.Max(.5, exploreKm / 3), draft!.Route.Geometry.Count);
+                        var near = woodland?.TargetsNear(searchStart, end.Snapped, Math.Max(.01, distanceRange.MaxKm - fixedDistanceKm),
+                            request.Start!, request.RadiusKm, focusKm) ?? [];
+                        if (near.Count > 0)
+                        {
+                            woodlandTargets = near;
+                            await Task.WhenAll(SearchWoodland(6), SearchSide(1, 1), SearchSide(-1, 1));
+                        }
+                        else await Task.WhenAll(SearchLocalLoop(1, exploreKm, 3), SearchLocalLoop(-1, exploreKm, 3), SearchSide(1, 1), SearchSide(-1, 1));
+                    }
+                    else if (woodlandTargets.Count > 0) await Task.WhenAll(SearchWoodland(6), SearchSide(1, 1), SearchSide(-1, 1));
+                    else await Task.WhenAll(SearchSide(1, 4), SearchSide(-1, 4));
                 }
             }
         }
@@ -288,6 +336,9 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
                     ? .05 * error + .1 * shape.RetracingFraction + .1 * accessPenalty + .75 * sceneryPenalty
                     : .15 * error + .15 * shape.RetracingFraction + .7 * sceneryPenalty
                 : .8 * error + .2 * shape.RetracingFraction + .25 * sceneryPenalty;
+            // Prefer continuations that stay around the drawn point over detours elsewhere.
+            if (focus is { } f)
+                score += .15 * (1 - Geo.ShareWithin(result.Geometry.Skip(f.PrefixVertices - 1).ToArray(), f.Point, f.RadiusKm));
             return new Evaluation(result, shape, maxDistance,
                 score, status, quality, forest);
         }).OrderBy(e => e.Status)

@@ -75,6 +75,22 @@ public sealed class WoodlandMap
     // Cluster nearby woodland path samples, including adjacent forest parcels separated
     // by a road. Waypoints are placed on mapped paths rather than in arbitrary trees.
     public IReadOnlyList<WoodlandTarget> Targets(Location start, Location end, double maxDistanceKm,
+        Location radiusCenter, double? radiusKm) =>
+        Clusters(start, end, maxDistanceKm, radiusCenter, radiusKm)
+            .OrderByDescending(target => target.Priority(start, end, maxDistanceKm)).Take(3).ToArray();
+
+    // Woodland the user pointed at: clusters with a path within focusKm of the focus
+    // (the last drawn point), nearest first, regardless of how cheap other forests are.
+    // A forest whose nearest path lies closer to home belongs to the way back, not the focus.
+    public IReadOnlyList<WoodlandTarget> TargetsNear(Location focus, Location end, double maxDistanceKm,
+        Location radiusCenter, double? radiusKm, double focusKm) =>
+        Clusters(focus, end, maxDistanceKm, radiusCenter, radiusKm)
+            .Select(target => (Target: target, Nearest: target.Points.MinBy(p => Geo.DistanceKm(focus, p))!))
+            .Select(t => (t.Target, t.Nearest, Distance: Geo.DistanceKm(focus, t.Nearest)))
+            .Where(t => t.Distance <= focusKm && t.Distance <= Geo.DistanceKm(t.Nearest, end))
+            .OrderBy(t => t.Distance).Take(3).Select(t => t.Target).ToArray();
+
+    private IEnumerable<WoodlandTarget> Clusters(Location start, Location end, double maxDistanceKm,
         Location radiusCenter, double? radiusKm)
     {
         var points = pathPoints.Where(p => Geo.DistanceKm(start, p) + Geo.DistanceKm(p, end) < maxDistanceKm * .95 &&
@@ -101,8 +117,7 @@ public sealed class WoodlandMap
         }
         return Enumerable.Range(0, points.Length).GroupBy(Root)
             .Select(group => new WoodlandTarget(group.Select(i => points[i]).ToArray()))
-            .Where(target => target.Points.Count >= 4 && target.SpreadKm >= .15)
-            .OrderByDescending(target => target.Priority(start, end, maxDistanceKm)).Take(3).ToArray();
+            .Where(target => target.Points.Count >= 4 && target.SpreadKm >= .15);
     }
 }
 
