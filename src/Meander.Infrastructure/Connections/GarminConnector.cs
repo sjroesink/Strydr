@@ -26,7 +26,13 @@ public sealed class GarminConnector(HttpClient http, GarminOptions options, Time
         {
             ["grant_type"] = "authorization_code", ["code"] = code, ["code_verifier"] = codeVerifier, ["redirect_uri"] = redirectUri.ToString()
         }, null, ct);
-        return tokens with { ExternalUserId = await UserIdAsync(tokens.AccessToken, ct) };
+        try { return tokens with { ExternalUserId = await UserIdAsync(tokens.AccessToken, ct) }; }
+        catch
+        {
+            // Do not leave a grant behind that Meander never stored.
+            try { await RevokeAsync(tokens, CancellationToken.None); } catch { }
+            throw;
+        }
     }
 
     public Task<ServiceTokens> RefreshAsync(ServiceTokens tokens, CancellationToken ct) => tokens.RefreshToken is { } refresh

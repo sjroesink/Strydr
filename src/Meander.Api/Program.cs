@@ -13,7 +13,6 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Http.Resilience;
-using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Timeout;
 
@@ -265,8 +264,8 @@ app.MapGet("/api/routes/{id:guid}/fit", (Guid id, IRouteSearchStore searches, IC
         : Results.Problem(statusCode: 404, title: "Route export expired or unavailable", detail: "Generate your route again to create a new download.",
             extensions: new Dictionary<string, object?> { ["code"] = "exportExpired" });
 });
-// API misses must remain ProblemDetails even when the production SPA is present.
 app.MapConnectionEndpoints();
+// API misses must remain ProblemDetails even when the production SPA is present.
 app.MapFallback("/api/{**path}", () => Results.Problem(statusCode: 404, title: "API endpoint not found", extensions: new Dictionary<string, object?> { ["code"] = "apiNotFound" }));
 app.MapFallback("/map/{**path}", () => Results.Problem(statusCode: 404, title: "Map file not found", extensions: new Dictionary<string, object?> { ["code"] = "mapFileNotFound" }));
 if (hasWebRoot) app.MapFallbackToFile("index.html");

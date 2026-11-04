@@ -115,7 +115,7 @@ public static class ConnectionEndpoints
             catch (Exception ex) when (ex is ProviderException or HttpRequestException or JsonException ||
                                        ex is TaskCanceledException && !ct.IsCancellationRequested)
             {
-                logger.LogWarning("Connecting {Service} failed: {Failure}", connector.Service, ex.GetType().Name);
+                logger.LogWarning("Connecting {Service} failed: {Failure}", connector.Service, Describe(ex));
                 return Results.Redirect(failed);
             }
             return Results.Redirect(QueryHelpers.AddQueryString(pending.ReturnUrl, "connected", Name(connector.Service)));
@@ -125,11 +125,21 @@ public static class ConnectionEndpoints
             ILogger<ConnectionService> logger, CancellationToken ct) =>
         {
             if (Connector(service, connections) is not { } connector) return ServiceNotFound();
-            if (SessionId(context) is { } session && connections.Remove(session, connector.Service) is { } removed)
+            if (SessionId(context) is { } session)
             {
-                try { await connector.RevokeAsync(removed.Tokens, ct); }
-                catch (Exception ex) when (ex is ProviderException or HttpRequestException or TaskCanceledException)
-                { logger.LogWarning("Revoking {Service} failed: {Failure}", connector.Service, ex.GetType().Name); }
+                // Revoke with a valid token: a stored one may have expired. A dead refresh means nothing is left to revoke.
+                ServiceTokens? tokens = null;
+                try { tokens = await connections.TokensAsync(session, connector.Service, ct); }
+                catch (ProviderException ex) when (ex.Failure == ProviderFailure.Unauthorized) { }
+                catch (Exception ex) when (ex is ProviderException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+                { logger.LogWarning("Refreshing {Service} before revoking failed: {Failure}", connector.Service, Describe(ex)); }
+                if (tokens is not null)
+                {
+                    try { await connector.RevokeAsync(tokens, ct); }
+                    catch (Exception ex) when (ex is ProviderException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+                    { logger.LogWarning("Revoking {Service} failed: {Failure}", connector.Service, Describe(ex)); }
+                }
+                connections.Remove(session, connector.Service);
             }
             return Results.NoContent();
         }).RequireRateLimiting("connect");
@@ -159,7 +169,7 @@ public static class ConnectionEndpoints
             catch (Exception ex) when (ex is ProviderException or HttpRequestException or JsonException ||
                                        ex is TaskCanceledException && !ct.IsCancellationRequested)
             {
-                logger.LogWarning("Sending a route to {Service} failed: {Failure}", connector.Service, ex.GetType().Name);
+                logger.LogWarning("Sending a route to {Service} failed: {Failure}", connector.Service, Describe(ex));
                 return Results.Problem(statusCode: 502, title: "Service unavailable",
                     detail: $"{connector.Service} did not accept the route. Try again shortly.", extensions: Code("serviceUnavailable"));
             }
@@ -169,9 +179,12 @@ public static class ConnectionEndpoints
     public static Guid? SessionId(HttpContext context) =>
         Guid.TryParse(context.Request.Cookies[SessionCookie], out var id) ? id : null;
 
+    // ProviderException messages are controlled and secret-free; anything else (HTTP errors can echo URLs with codes) logs its type only.
+    private static string Describe(Exception ex) => ex is ProviderException ? $"{ex.GetType().Name}: {ex.Message}" : ex.GetType().Name;
+
     public static string LocalPath(string? returnUrl) =>
-        returnUrl is { Length: > 0 } && returnUrl[0] == '/' && (returnUrl.Length == 1 || returnUrl[1] is not ('/' or '\\')) &&
-        !returnUrl.Any(char.IsControl) ? returnUrl : "/";
+        returnUrl is { Length: > 0 and <= 2048 } && returnUrl[0] == '/' && (returnUrl.Length == 1 || returnUrl[1] is not ('/' or '\\')) &&
+        returnUrl.All(c => c is >= ' ' and <= '~') ? returnUrl : "/";
 
     private static IServiceConnector? Connector(string service, ConnectionService connections) =>
         Enum.TryParse<ServiceKind>(service, ignoreCase: true, out var kind) && Enum.IsDefined(kind) ? connections.Connector(kind) : null;

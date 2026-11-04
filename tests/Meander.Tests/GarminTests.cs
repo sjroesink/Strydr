@@ -147,6 +147,28 @@ public sealed class GarminTests
     }
 
     [Fact]
+    public async Task DisconnectRevokesWithARefreshedToken()
+    {
+        var clock = new TestClock();
+        await using var app = new ApiFactory(new(), new() { ["Integrations:Garmin:ClientId"] = "client-1", ["Integrations:Garmin:ClientSecret"] = "secret-1" },
+            configure: services =>
+            {
+                services.AddHttpClient<GarminConnector>().ConfigurePrimaryHttpMessageHandler(() => garmin);
+                services.AddHttpClient<GarminCourseDestination>().ConfigurePrimaryHttpMessageHandler(() => garmin);
+                services.AddSingleton<TimeProvider>(clock);
+            });
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Connect(client);
+        clock.Now += TimeSpan.FromDays(2);
+        using var deleted = await client.DeleteAsync("/api/connections/garmin");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        Assert.Contains(garmin.Requests, r => r.Url.EndsWith("/oauth/token") && QueryHelpers.ParseQuery(r.Body)["grant_type"] == "refresh_token");
+        var revoke = garmin.Requests.Single(r => r.Method == HttpMethod.Delete && r.Url.EndsWith("/user/registration"));
+        Assert.Equal("Bearer garmin-access-refresh_token", revoke.Authorization);
+        Assert.False((await client.GetFromJsonAsync<JsonElement>("/api/connections"))[0].GetProperty("connected").GetBoolean());
+    }
+
+    [Fact]
     public async Task ConnectFailsWhenGarminReturnsNoUserId()
     {
         garmin.UserIdStatus = HttpStatusCode.InternalServerError;
@@ -157,6 +179,8 @@ public sealed class GarminTests
         using var callback = await client.GetAsync($"/api/connections/garmin/callback?code=garmin-code&state={state}");
         Assert.Equal("/?connectError=garmin", callback.Headers.Location!.OriginalString);
         Assert.False((await client.GetFromJsonAsync<JsonElement>("/api/connections"))[0].GetProperty("connected").GetBoolean());
+        Assert.Contains(garmin.Requests, r => r.Method == HttpMethod.Delete && r.Url.EndsWith("/user/registration")
+            && r.Authorization == "Bearer garmin-access-authorization_code");
     }
 
     private async Task<HttpResponseMessage> SendRoute()

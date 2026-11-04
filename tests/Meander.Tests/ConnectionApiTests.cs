@@ -116,8 +116,39 @@ public sealed class ConnectionApiTests
     [InlineData("/\t/x", "/")]
     [InlineData("/a\r\nb", "/")]
     [InlineData("https://x", "/")]
+    [InlineData("/café", "/")]
+    [InlineData("/ab", "/")]
     public void LocalPathKeepsOnlySafeLocalPaths(string? returnUrl, string expected) =>
         Assert.Equal(expected, ConnectionEndpoints.LocalPath(returnUrl));
+
+    [Fact]
+    public void LocalPathRejectsOverlongValues()
+    {
+        Assert.Equal("/" + new string('a', 2047), ConnectionEndpoints.LocalPath("/" + new string('a', 2047)));
+        Assert.Equal("/", ConnectionEndpoints.LocalPath("/" + new string('a', 2048)));
+    }
+
+    [Theory]
+    [InlineData("http://localhost", false)]
+    [InlineData("https://localhost", true)]
+    public async Task AuthorizeCookiesAreHttpOnlyLaxAndSecureOnlyOverHttps(string publicBase, bool secure)
+    {
+        await using var app = App(new() { ["PublicBaseUrl"] = publicBase });
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions
+        { AllowAutoRedirect = false, HandleCookies = false, BaseAddress = new Uri(publicBase) });
+        using var response = await client.GetAsync("/api/connections/garmin/authorize?returnUrl=%2F");
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        var headers = response.Headers.GetValues("Set-Cookie").ToList();
+        foreach (var name in new[] { ConnectionEndpoints.SessionCookie, ConnectionEndpoints.PendingCookie })
+        {
+            var cookie = Assert.Single(headers, h => h.StartsWith(name + "="));
+            var attributes = cookie.Split(';').Skip(1).Select(a => a.Trim().ToLowerInvariant()).ToList();
+            Assert.Contains("httponly", attributes);
+            Assert.Contains("samesite=lax", attributes);
+            Assert.Contains("path=/", attributes);
+            Assert.Equal(secure, attributes.Contains("secure"));
+        }
+    }
 
     // These tests drive the cookies by hand so they can plant, swap and compare session ids.
     private static HttpClient Manual(ApiFactory app) =>
