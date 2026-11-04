@@ -130,7 +130,7 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
                 woodland = await woodlands.FindAsync(exploreDrawn ? searchStart : Geo.Interpolate(searchStart, end.Snapped, .5),
                     distanceRange.MaxKm / 2, ct);
                 if (woodland is null)
-                    warnings.Add(new("woodlandUnavailable", "Could not look up nearby woodland. These routes may not follow your woodland preference. Try again later."));
+                    warnings.Add(new("woodlandUnavailable", "Could not look up nearby forest and heath. These routes may not follow your green preference. Try again later."));
             }
             var woodlandTargets = woodland?.Targets(searchStart, end.Snapped,
                 Math.Max(.01, distanceRange.MaxKm - fixedDistanceKm), request.Start!, request.RadiusKm) ?? [];
@@ -391,7 +391,7 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
             if (request.PreferGreen && e.Quality.GreenScore is null && e.Woodland is null && woodlands is null)
                 allWarnings.Add(new("greenDataUnavailable", "Not enough greenery data is available to compare this route's green preference."));
             if (request.PreferGreen && e.Woodland is { Percent: < 1 })
-                allWarnings.Add(new("woodlandNotReached", "No substantial woodland was reached within this distance. Try a longer route or a start nearer a forest."));
+                allWarnings.Add(new("woodlandNotReached", "No substantial forest or heath was reached within this distance. Try a longer route or a start nearer a forest."));
             if (request.PreferUnpaved && (e.Quality.SurfaceKnownPercent ?? 0) < 90)
                 allWarnings.Add(new("surfaceDataIncomplete", $"Surface is known for {e.Quality.SurfaceKnownPercent ?? 0:F0}% of this route. The unpaved share counts confirmed sections only."));
             if (!distanceRange.Contains(e.Result.DistanceKm))

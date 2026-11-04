@@ -80,9 +80,10 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
             [out:json][timeout:{timeout}][maxsize:{maxSizeBytes}];
             is_in({lat},{lon})->.here;
             (
-              wr{around}[natural=wood]; wr{around}[landuse=forest];
+              wr{around}[natural=wood]; wr{around}[landuse=forest]; wr{around}[natural=heath];
               way(pivot.here)[natural=wood]; rel(pivot.here)[natural=wood];
               way(pivot.here)[landuse=forest]; rel(pivot.here)[landuse=forest];
+              way(pivot.here)[natural=heath]; rel(pivot.here)[natural=heath];
             ); out geom;
             way{around}[highway~"^(path|footway|track|bridleway|cycleway|pedestrian|living_street)$"]
               [access!~"^(no|private)$"][foot!~"^(no|private)$"]; out geom;
@@ -102,7 +103,8 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
         {
             if (!element.TryGetProperty("tags", out var tags)) continue;
             string? Tag(string name) => tags.TryGetProperty(name, out var value) ? value.GetString() : null;
-            var forest = Tag("natural") == "wood" || Tag("landuse") == "forest";
+            // Heath counts with forest: open heathland such as the Sallandse Heuvelrug is the nature runners look for.
+            var forest = Tag("natural") is "wood" or "heath" || Tag("landuse") == "forest";
             var type = element.GetProperty("type").GetString();
             if (forest && type == "way" && element.TryGetProperty("geometry", out var geometry))
             {

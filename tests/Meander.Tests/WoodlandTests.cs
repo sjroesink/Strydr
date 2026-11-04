@@ -48,6 +48,23 @@ public sealed class WoodlandTests
     }
 
     [Fact]
+    public void HeathCountsWithForestButFarmlandAndGrassDoNot()
+    {
+        using var json = JsonDocument.Parse("""
+            {"elements":[
+              {"type":"way","tags":{"natural":"heath"},"geometry":[{"lat":0,"lon":0},{"lat":0,"lon":1},{"lat":1,"lon":1},{"lat":1,"lon":0},{"lat":0,"lon":0}]},
+              {"type":"way","tags":{"landuse":"farmland"},"geometry":[{"lat":2,"lon":0},{"lat":2,"lon":1},{"lat":3,"lon":1},{"lat":3,"lon":0},{"lat":2,"lon":0}]},
+              {"type":"way","tags":{"landuse":"grass"},"geometry":[{"lat":4,"lon":0},{"lat":4,"lon":1},{"lat":5,"lon":1},{"lat":5,"lon":0},{"lat":4,"lon":0}]}
+            ]}
+            """);
+        var map = OverpassWoodlandProvider.Parse(new(0, 0), json.RootElement);
+        Assert.Equal(1, map.PolygonCount);
+        Assert.True(map.Contains(new(.5, .5)));
+        Assert.False(map.Contains(new(2.5, .5)));
+        Assert.False(map.Contains(new(4.5, .5)));
+    }
+
+    [Fact]
     public void TimeoutRemarkIsRejectedRatherThanPresentingPartialForestCoverage()
     {
         using var json = JsonDocument.Parse("""{"remark":"runtime error: query timed out","elements":[]}""");
@@ -209,6 +226,7 @@ public sealed class WoodlandTests
         Assert.DoesNotContain("Authorization", handler.Headers!);
         Assert.Contains("natural=wood", handler.Body!);
         Assert.Contains("landuse=forest", handler.Body!);
+        Assert.Contains("natural=heath", handler.Body!);
     }
 
     private sealed class Clients(HttpClient client) : IHttpClientFactory
