@@ -16,6 +16,7 @@ internal sealed class StubGarmin : HttpMessageHandler
     public HttpStatusCode CourseStatus { get; set; } = HttpStatusCode.OK;
     public HttpStatusCode UserIdStatus { get; set; } = HttpStatusCode.OK;
     public object CourseResponse { get; set; } = new { courseId = 987654 };
+    public bool RefreshReturnsNonJson { get; set; }
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
@@ -24,6 +25,8 @@ internal sealed class StubGarmin : HttpMessageHandler
         if (path.EndsWith("/oauth/token"))
         {
             var form = QueryHelpers.ParseQuery(body);
+            if (form["grant_type"] == "refresh_token" && RefreshReturnsNonJson)
+                return new(HttpStatusCode.OK) { Content = new StringContent("not json", System.Text.Encoding.UTF8, "application/json") };
             if (form["grant_type"] == "refresh_token" && form["refresh_token"] == "dead")
                 return new(HttpStatusCode.BadRequest) { Content = JsonContent.Create(new { error = "invalid_grant" }) };
             return Json(new { access_token = $"garmin-access-{form["grant_type"]}", refresh_token = "garmin-refresh", expires_in = 86400, token_type = "bearer" });
@@ -165,6 +168,28 @@ public sealed class GarminTests
         Assert.Contains(garmin.Requests, r => r.Url.EndsWith("/oauth/token") && QueryHelpers.ParseQuery(r.Body)["grant_type"] == "refresh_token");
         var revoke = garmin.Requests.Single(r => r.Method == HttpMethod.Delete && r.Url.EndsWith("/user/registration"));
         Assert.Equal("Bearer garmin-access-refresh_token", revoke.Authorization);
+        Assert.False((await client.GetFromJsonAsync<JsonElement>("/api/connections"))[0].GetProperty("connected").GetBoolean());
+    }
+
+    [Fact]
+    public async Task DisconnectRemovesTheConnectionWhenTheRefreshReturnsBadJson()
+    {
+        var clock = new TestClock();
+        garmin.RefreshReturnsNonJson = true;
+        await using var app = new ApiFactory(new(), new() { ["Integrations:Garmin:ClientId"] = "client-1", ["Integrations:Garmin:ClientSecret"] = "secret-1" },
+            configure: services =>
+            {
+                services.AddHttpClient<GarminConnector>().ConfigurePrimaryHttpMessageHandler(() => garmin);
+                services.AddHttpClient<GarminCourseDestination>().ConfigurePrimaryHttpMessageHandler(() => garmin);
+                services.AddSingleton<TimeProvider>(clock);
+            });
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Connect(client);
+        clock.Now += TimeSpan.FromDays(2);
+        using var deleted = await client.DeleteAsync("/api/connections/garmin");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        Assert.Contains(garmin.Requests, r => r.Url.EndsWith("/oauth/token") && QueryHelpers.ParseQuery(r.Body)["grant_type"] == "refresh_token");
+        Assert.DoesNotContain(garmin.Requests, r => r.Method == HttpMethod.Delete && r.Url.EndsWith("/user/registration"));
         Assert.False((await client.GetFromJsonAsync<JsonElement>("/api/connections"))[0].GetProperty("connected").GetBoolean());
     }
 

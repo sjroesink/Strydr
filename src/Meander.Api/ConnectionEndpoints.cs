@@ -131,7 +131,7 @@ public static class ConnectionEndpoints
                 ServiceTokens? tokens = null;
                 try { tokens = await connections.TokensAsync(session, connector.Service, ct); }
                 catch (ProviderException ex) when (ex.Failure == ProviderFailure.Unauthorized) { }
-                catch (Exception ex) when (ex is ProviderException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+                catch (Exception ex) when (ex is ProviderException or HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
                 { logger.LogWarning("Refreshing {Service} before revoking failed: {Failure}", connector.Service, Describe(ex)); }
                 if (tokens is not null)
                 {
