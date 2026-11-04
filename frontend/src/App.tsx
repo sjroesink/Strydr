@@ -753,7 +753,7 @@ export default function App() {
               </dl>
               {candidate.status !== 'qualified' && <span className="route-status">{candidate.status === 'diagnostic' ? 'Exceeds radius · diagnostic' : 'Outside target distance'}</span>}
               {(candidate.woodlandPercent != null || candidate.unpavedPercent != null) && <div className="route-quality">
-                {candidate.woodlandPercent != null && <span title="Approximate route length inside forest or heath mapped in OpenStreetMap"><Icon name="green" />{Math.round(candidate.woodlandPercent)}% forest &amp; heath</span>}
+                {candidate.woodlandPercent != null && <span title="Approximate route length inside forest, heath, dunes or nature reserves mapped in OpenStreetMap"><Icon name="green" />{Math.round(candidate.woodlandPercent)}% nature</span>}
                 {candidate.unpavedPercent != null && <span><Icon name="unpaved" />{Math.round(candidate.unpavedPercent)}% confirmed unpaved</span>}
               </div>}
               {warnings.length > 0 && <ul className="route-warnings">{warnings.map(w => <li key={w.code}>{w.message}</li>)}</ul>}

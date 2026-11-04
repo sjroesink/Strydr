@@ -223,7 +223,7 @@ it('sends scenery preferences and default backtracking avoidance and shows route
   await userEvent.click(screen.getByRole('checkbox', { name: /Unpaved paths/ }));
   await search();
   expect(generate).toHaveBeenCalledWith(expect.objectContaining({ preferGreen: true, preferUnpaved: true, avoidBacktracking: true }), expect.any(AbortSignal));
-  expect(await screen.findByText('61% forest & heath')).toBeInTheDocument();
+  expect(await screen.findByText('61% nature')).toBeInTheDocument();
   expect(screen.queryByText(/Green index/)).not.toBeInTheDocument();
   expect(screen.getByText('42% confirmed unpaved')).toBeInTheDocument();
 });
@@ -296,12 +296,12 @@ it('cancels generation without displaying a failure', async () => {
 it('labels diagnostic routes and renders warnings and missing elevation', async () => {
   vi.mocked(generate).mockResolvedValue([{ ...candidate(), status: 'diagnostic', elevationGainM: null,
     warnings: [{ code: 'radiusExceeded', message: 'This route exceeds the radius.' },
-      { code: 'woodlandUnavailable', message: 'Could not look up nearby forest and heath. These routes may not follow your green preference. Try again later.' }] }]);
+      { code: 'woodlandUnavailable', message: 'Could not look up nearby nature. These routes may not follow your green preference. Try again later.' }] }]);
   render(<App />); await chooseStart(); await toPreferences(); await search();
   expect(await screen.findByText('Exceeds radius · diagnostic')).toBeInTheDocument();
   expect(screen.getByText('This route exceeds the radius.')).toBeInTheDocument();
   expect(screen.getByText(/Elevation unavailable/)).toBeInTheDocument();
-  expect(screen.queryByText(/Could not look up nearby forest and heath/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Could not look up nearby nature/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Furthest point/)).not.toBeInTheDocument();
 });
 

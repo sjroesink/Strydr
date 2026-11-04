@@ -138,7 +138,7 @@ test('choose a start, generate and inspect routes, and export GPX', async ({ pag
   expect(generatedResponse.request().postDataJSON().distanceFlexibilityPercent).toBe(15);
   expect(generatedResponse.request().postDataJSON().avoidBacktracking).toBe(true);
   await expect(page.getByRole('button', { name: /Route [123]/ })).toHaveCount(3);
-  await expect(page.getByText('100% forest & heath')).toHaveCount(3);
+  await expect(page.getByText('100% nature')).toHaveCount(3);
   await expect(page.getByText(/Green index/)).toHaveCount(0);
   await expect(page.getByText(/confirmed unpaved/)).toHaveCount(3);
   const second = page.getByRole('button', { name: /Route 2/ });

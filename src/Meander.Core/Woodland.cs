@@ -21,6 +21,7 @@ public sealed class WoodlandMap
     private readonly Location center;
     private readonly Location[] pathPoints;
     private readonly STRtree<Location> pathIndex = new();
+    private readonly HashSet<Location> pathSet;
     public int PolygonCount { get; }
 
     public WoodlandMap(Location center, IReadOnlyList<WoodlandPolygon> polygons, IReadOnlyList<Location> paths)
@@ -41,6 +42,7 @@ public sealed class WoodlandMap
         }
         index.Build();
         pathPoints = paths.Where(Contains).DistinctBy(p => (Math.Round(p.Latitude, 5), Math.Round(p.Longitude, 5))).ToArray();
+        pathSet = [.. pathPoints];
         foreach (var point in pathPoints) pathIndex.Insert(new Envelope(Coordinate(point)), point);
         pathIndex.Build();
     }
@@ -102,6 +104,8 @@ public sealed class WoodlandMap
             .SelectMany(bearing => WoodlandLoop.Shapes.Select(stretch => new WoodlandLoop(this, start, bearing, stretch)))
             .Select(loop => (Loop: loop, Points: loop.Waypoints(distanceKm, 1, 1, point => point)))
             .Where(c => radiusKm is null || c.Points.All(p => Geo.DistanceKm(radiusCenter, p) <= radiusKm * .98))
+            // Like forest targets, ovals need anchors on mapped paths rather than in arbitrary trees.
+            .Where(c => c.Points.Skip(1).SkipLast(1).Any(pathSet.Contains))
             // Forest length rather than share, so an oval that lost most anchors does not win as a short spur.
             .Select(c => (c.Loop, Cover: Measure(c.Points).Percent / 100 * c.Points.Zip(c.Points.Skip(1), Geo.DistanceKm).Sum()))
             .Where(c => c.Cover > 0).OrderByDescending(c => c.Cover).ToArray();

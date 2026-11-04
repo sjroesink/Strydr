@@ -80,10 +80,12 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
             [out:json][timeout:{timeout}][maxsize:{maxSizeBytes}];
             is_in({lat},{lon})->.here;
             (
-              wr{around}[natural=wood]; wr{around}[landuse=forest]; wr{around}[natural=heath];
-              way(pivot.here)[natural=wood]; rel(pivot.here)[natural=wood];
+              wr{around}[natural~"^(wood|heath|sand|dune)$"]; wr{around}[landuse=forest];
+              wr{around}[leisure=nature_reserve]; wr{around}[boundary=national_park];
+              way(pivot.here)[natural~"^(wood|heath|sand|dune)$"]; rel(pivot.here)[natural~"^(wood|heath|sand|dune)$"];
               way(pivot.here)[landuse=forest]; rel(pivot.here)[landuse=forest];
-              way(pivot.here)[natural=heath]; rel(pivot.here)[natural=heath];
+              way(pivot.here)[leisure=nature_reserve]; rel(pivot.here)[leisure=nature_reserve];
+              way(pivot.here)[boundary=national_park]; rel(pivot.here)[boundary=national_park];
             ); out geom;
             way{around}[highway~"^(path|footway|track|bridleway|cycleway|pedestrian|living_street)$"]
               [access!~"^(no|private)$"][foot!~"^(no|private)$"]; out geom;
@@ -103,15 +105,17 @@ public sealed class OverpassWoodlandProvider(IHttpClientFactory clients, Woodlan
         {
             if (!element.TryGetProperty("tags", out var tags)) continue;
             string? Tag(string name) => tags.TryGetProperty(name, out var value) ? value.GetString() : null;
-            // Heath counts with forest: open heathland such as the Sallandse Heuvelrug is the nature runners look for.
-            var forest = Tag("natural") is "wood" or "heath" || Tag("landuse") == "forest";
+            // Nature rather than only trees: open heath and drift sand or dunes such as on the Sallandse
+            // Heuvelrug, and whole nature reserves and national parks including the paths between their patches.
+            var forest = Tag("natural") is "wood" or "heath" or "sand" or "dune" || Tag("landuse") == "forest" ||
+                Tag("leisure") == "nature_reserve" || Tag("boundary") == "national_park";
             var type = element.GetProperty("type").GetString();
             if (forest && type == "way" && element.TryGetProperty("geometry", out var geometry))
             {
                 var ring = Points(geometry);
                 if (Closed(ring)) polygons.Add(new(ring, []));
             }
-            else if (forest && type == "relation" && Tag("type") == "multipolygon")
+            else if (forest && type == "relation" && Tag("type") is "multipolygon" or "boundary")
             {
                 var outer = new List<Location[]>(); var inner = new List<Location[]>();
                 foreach (var member in element.GetProperty("members").EnumerateArray())

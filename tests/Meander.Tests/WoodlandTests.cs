@@ -48,20 +48,26 @@ public sealed class WoodlandTests
     }
 
     [Fact]
-    public void HeathCountsWithForestButFarmlandAndGrassDoNot()
+    public void HeathSandReservesAndParksCountAsNatureButFarmlandAndCityParksDoNot()
     {
-        using var json = JsonDocument.Parse("""
+        static string Square(double lat) =>
+            $$"""[{"lat":{{lat}},"lon":0},{"lat":{{lat}},"lon":1},{"lat":{{lat + 1}},"lon":1},{"lat":{{lat + 1}},"lon":0},{"lat":{{lat}},"lon":0}]""";
+        using var json = JsonDocument.Parse($$"""
             {"elements":[
-              {"type":"way","tags":{"natural":"heath"},"geometry":[{"lat":0,"lon":0},{"lat":0,"lon":1},{"lat":1,"lon":1},{"lat":1,"lon":0},{"lat":0,"lon":0}]},
-              {"type":"way","tags":{"landuse":"farmland"},"geometry":[{"lat":2,"lon":0},{"lat":2,"lon":1},{"lat":3,"lon":1},{"lat":3,"lon":0},{"lat":2,"lon":0}]},
-              {"type":"way","tags":{"landuse":"grass"},"geometry":[{"lat":4,"lon":0},{"lat":4,"lon":1},{"lat":5,"lon":1},{"lat":5,"lon":0},{"lat":4,"lon":0}]}
+              {"type":"way","tags":{"natural":"heath"},"geometry":{{Square(0)}}},
+              {"type":"way","tags":{"natural":"sand"},"geometry":{{Square(2)}}},
+              {"type":"way","tags":{"leisure":"nature_reserve"},"geometry":{{Square(4)}}},
+              {"type":"relation","tags":{"type":"boundary","boundary":"national_park"},"members":[
+                {"type":"way","role":"outer","geometry":{{Square(6)}}}]},
+              {"type":"way","tags":{"landuse":"farmland"},"geometry":{{Square(8)}}},
+              {"type":"way","tags":{"leisure":"park"},"geometry":{{Square(10)}}},
+              {"type":"way","tags":{"natural":"grassland"},"geometry":{{Square(12)}}}
             ]}
             """);
         var map = OverpassWoodlandProvider.Parse(new(0, 0), json.RootElement);
-        Assert.Equal(1, map.PolygonCount);
-        Assert.True(map.Contains(new(.5, .5)));
-        Assert.False(map.Contains(new(2.5, .5)));
-        Assert.False(map.Contains(new(4.5, .5)));
+        Assert.Equal(4, map.PolygonCount);
+        foreach (var lat in new[] { .5, 2.5, 4.5, 6.5 }) Assert.True(map.Contains(new(lat, .5)));
+        foreach (var lat in new[] { 8.5, 10.5, 12.5 }) Assert.False(map.Contains(new(lat, .5)));
     }
 
     [Fact]
@@ -224,9 +230,11 @@ public sealed class WoodlandTests
         Assert.Equal(1, handler.Calls);
         Assert.All(results, map => Assert.Equal(status == 200, map is not null));
         Assert.DoesNotContain("Authorization", handler.Headers!);
-        Assert.Contains("natural=wood", handler.Body!);
+        Assert.Contains("wood", handler.Body!);
         Assert.Contains("landuse=forest", handler.Body!);
-        Assert.Contains("natural=heath", handler.Body!);
+        Assert.Contains("heath", handler.Body!);
+        Assert.Contains("leisure=nature_reserve", handler.Body!);
+        Assert.Contains("boundary=national_park", handler.Body!);
     }
 
     private sealed class Clients(HttpClient client) : IHttpClientFactory
