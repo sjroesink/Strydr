@@ -225,6 +225,15 @@ app.MapGet("/api/routes/{id:guid}/gpx", (Guid id, ICandidateStore store, HttpCon
         : Results.Problem(statusCode: 404, title: "Route export expired or unavailable", detail: "Generate your route again to create a new GPX download.",
             extensions: new Dictionary<string, object?> { ["code"] = "exportExpired" });
 });
+app.MapGet("/api/routes/{id:guid}/fit", (Guid id, IRouteSearchStore searches, ICandidateStore cache, TimeProvider clock, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return RouteLookup.Find(id, searches, cache) is { } found
+        ? Results.File(FitCourseWriter.Write(found.Route, found.Activity, clock.GetUtcNow()), "application/vnd.ant.fit",
+            $"meander-{found.Route.DistanceKm.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}km-{id:N}.fit")
+        : Results.Problem(statusCode: 404, title: "Route export expired or unavailable", detail: "Generate your route again to create a new download.",
+            extensions: new Dictionary<string, object?> { ["code"] = "exportExpired" });
+});
 // API misses must remain ProblemDetails even when the production SPA is present.
 app.MapFallback("/api/{**path}", () => Results.Problem(statusCode: 404, title: "API endpoint not found", extensions: new Dictionary<string, object?> { ["code"] = "apiNotFound" }));
 app.MapFallback("/map/{**path}", () => Results.Problem(statusCode: 404, title: "Map file not found", extensions: new Dictionary<string, object?> { ["code"] = "mapFileNotFound" }));
