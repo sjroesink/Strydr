@@ -20,7 +20,7 @@ public static class ConnectionEndpoints
     private static readonly TimeSpan PendingLifetime = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(365);
 
-    private sealed record PendingAuthorization(string State, string Verifier, ServiceKind Service, string ReturnUrl, DateTimeOffset ExpiresAt);
+    private sealed record PendingAuthorization(Guid SessionId, string State, string Verifier, ServiceKind Service, string ReturnUrl, DateTimeOffset ExpiresAt);
 
     public static void MapConnectionEndpoints(this WebApplication app)
     {
@@ -32,17 +32,19 @@ public static class ConnectionEndpoints
         });
 
         app.MapGet("/api/connections/{service}/authorize", (string service, string? returnUrl, HttpContext context,
-            ConnectionService connections, ConnectionOptions options, IDataProtectionProvider protection, TimeProvider clock) =>
+            ConnectionService connections, IConnectionStore store, ConnectionOptions options, IDataProtectionProvider protection, TimeProvider clock) =>
         {
             if (Connector(service, connections) is not { } connector) return ServiceNotFound();
             // Cookies are per host, so the flow must start on the host the callback returns to.
             var publicBase = new Uri(options.PublicBaseUrl);
             if (!string.Equals(context.Request.Host.Host, publicBase.Host, StringComparison.OrdinalIgnoreCase))
                 return Results.Redirect(new Uri(publicBase, context.Request.Path + context.Request.QueryString).ToString());
-            if (SessionId(context) is null)
-                context.Response.Cookies.Append(SessionCookie, Guid.NewGuid().ToString(), Cookie(options, SessionLifetime));
+            // A client-chosen sid is only trusted while it already owns connections; otherwise issue a fresh one.
+            var sid = SessionId(context) is { } existing && store.List(existing).Count > 0 ? existing : Guid.NewGuid();
+            if (SessionId(context) != sid)
+                context.Response.Cookies.Append(SessionCookie, sid.ToString(), Cookie(options, SessionLifetime));
             var pkce = OAuthPkce.Create();
-            var pending = new PendingAuthorization(pkce.State, pkce.Verifier, connector.Service, LocalPath(returnUrl), clock.GetUtcNow() + PendingLifetime);
+            var pending = new PendingAuthorization(sid, pkce.State, pkce.Verifier, connector.Service, LocalPath(returnUrl), clock.GetUtcNow() + PendingLifetime);
             context.Response.Cookies.Append(PendingCookie, Pending(protection).Protect(JsonSerializer.Serialize(pending)), Cookie(options, PendingLifetime));
             return Results.Redirect(connector.BuildAuthorizeUrl(pkce.State, pkce.Challenge, RedirectUri(options, connector.Service)).ToString());
         }).RequireRateLimiting("connect");
@@ -54,7 +56,7 @@ public static class ConnectionEndpoints
             var pending = ReadPending(context, protection);
             context.Response.Cookies.Delete(PendingCookie, Cookie(options, TimeSpan.Zero));
             if (Connector(service, connections) is not { } connector) return ServiceNotFound();
-            if (pending is null || SessionId(context) is not { } session || pending.Service != connector.Service ||
+            if (pending is null || SessionId(context) is not { } session || pending.SessionId != session || pending.Service != connector.Service ||
                 pending.ExpiresAt < clock.GetUtcNow() || state is null ||
                 !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(state), Encoding.UTF8.GetBytes(pending.State)))
                 return Results.Problem(statusCode: 400, title: "Connection could not be completed",
@@ -64,7 +66,15 @@ public static class ConnectionEndpoints
             try
             {
                 var tokens = await connector.ExchangeCodeAsync(code, pending.Verifier, RedirectUri(options, connector.Service), ct);
-                store.Upsert(new ServiceConnection(session, connector.Service, tokens, clock.GetUtcNow()));
+                // Rotate the session so the sid that now holds tokens was never chosen by the client.
+                var rotated = Guid.NewGuid();
+                foreach (var held in store.List(session))
+                {
+                    store.Upsert(held with { SessionId = rotated });
+                    store.Delete(session, held.Service);
+                }
+                store.Upsert(new ServiceConnection(rotated, connector.Service, tokens, clock.GetUtcNow()));
+                context.Response.Cookies.Append(SessionCookie, rotated.ToString(), Cookie(options, SessionLifetime));
             }
             catch (Exception ex) when (ex is ProviderException or HttpRequestException or JsonException ||
                                        ex is TaskCanceledException && !ct.IsCancellationRequested)
@@ -113,7 +123,7 @@ public static class ConnectionEndpoints
             catch (Exception ex) when (ex is ProviderException or HttpRequestException or JsonException ||
                                        ex is TaskCanceledException && !ct.IsCancellationRequested)
             {
-                logger.LogWarning("Sending a route to {Service} failed: {Failure}", connector.Service, ex.Message);
+                logger.LogWarning("Sending a route to {Service} failed: {Failure}", connector.Service, ex.GetType().Name);
                 return Results.Problem(statusCode: 502, title: "Service unavailable",
                     detail: $"{connector.Service} did not accept the route. Try again shortly.", extensions: Code("serviceUnavailable"));
             }
@@ -124,7 +134,8 @@ public static class ConnectionEndpoints
         Guid.TryParse(context.Request.Cookies[SessionCookie], out var id) ? id : null;
 
     public static string LocalPath(string? returnUrl) =>
-        returnUrl is { Length: > 0 } && returnUrl[0] == '/' && (returnUrl.Length == 1 || returnUrl[1] is not ('/' or '\\')) ? returnUrl : "/";
+        returnUrl is { Length: > 0 } && returnUrl[0] == '/' && (returnUrl.Length == 1 || returnUrl[1] is not ('/' or '\\')) &&
+        !returnUrl.Any(char.IsControl) ? returnUrl : "/";
 
     private static IServiceConnector? Connector(string service, ConnectionService connections) =>
         Enum.TryParse<ServiceKind>(service, ignoreCase: true, out var kind) && Enum.IsDefined(kind) ? connections.Connector(kind) : null;

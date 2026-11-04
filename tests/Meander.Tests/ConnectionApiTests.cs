@@ -93,6 +93,8 @@ public sealed class ConnectionApiTests
     [InlineData("https://evil.test/x", "/")]
     [InlineData("//evil.test/x", "/")]
     [InlineData("/\\evil.test", "/")]
+    [InlineData("/\t/evil.test", "/")]
+    [InlineData("/\n/evil.test", "/")]
     [InlineData("/routes/a?route=b", "/routes/a?route=b")]
     public async Task OnlyReturnsToLocalPaths(string returnUrl, string expected)
     {
@@ -100,8 +102,103 @@ public sealed class ConnectionApiTests
         using var client = Client(app);
         var state = await Authorize(client, returnUrl);
         using var callback = await client.GetAsync($"/api/connections/garmin/callback?code=abc&state={state}");
-        Assert.StartsWith(expected, callback.Headers.Location!.OriginalString);
-        Assert.Contains("connected=garmin", callback.Headers.Location!.OriginalString);
+        var separator = expected.Contains('?') ? "&" : "?";
+        Assert.Equal($"{expected}{separator}connected=garmin", callback.Headers.Location!.OriginalString);
+    }
+
+    [Theory]
+    [InlineData(null, "/")]
+    [InlineData("", "/")]
+    [InlineData("/", "/")]
+    [InlineData("/a?b=c", "/a?b=c")]
+    [InlineData("//x", "/")]
+    [InlineData("/\\x", "/")]
+    [InlineData("/\t/x", "/")]
+    [InlineData("/a\r\nb", "/")]
+    [InlineData("https://x", "/")]
+    public void LocalPathKeepsOnlySafeLocalPaths(string? returnUrl, string expected) =>
+        Assert.Equal(expected, ConnectionEndpoints.LocalPath(returnUrl));
+
+    // These tests drive the cookies by hand so they can plant, swap and compare session ids.
+    private static HttpClient Manual(ApiFactory app) =>
+        app.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
+
+    private static Dictionary<string, string> SetCookies(HttpResponseMessage response) =>
+        response.Headers.TryGetValues("Set-Cookie", out var values)
+            ? values.Select(v => v.Split(';')[0].Split('=', 2)).ToDictionary(p => p[0], p => p[1])
+            : [];
+
+    private static async Task<HttpResponseMessage> Get(HttpClient client, string url, params (string Name, string Value)[] cookies)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        if (cookies.Length > 0) request.Headers.Add("Cookie", string.Join("; ", cookies.Select(c => $"{c.Name}={c.Value}")));
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<bool> IsConnected(HttpClient client, string sid)
+    {
+        using var response = await Get(client, "/api/connections", ("meander_sid", sid));
+        return (await response.Content.ReadFromJsonAsync<JsonElement>())[0].GetProperty("connected").GetBoolean();
+    }
+
+    // Authorizes with an optional sid cookie, then completes the callback with the sid the browser would hold.
+    private static async Task<(string Authorized, string? Final, HttpResponseMessage Callback)> Connect(HttpClient client, string? sid)
+    {
+        using var authorize = await Get(client, "/api/connections/garmin/authorize",
+            sid is null ? [] : [("meander_sid", sid)]);
+        var cookies = SetCookies(authorize);
+        var authorized = cookies.GetValueOrDefault("meander_sid", sid!);
+        var state = QueryHelpers.ParseQuery(authorize.Headers.Location!.Query)["state"].ToString();
+        var callback = await Get(client, $"/api/connections/garmin/callback?code=abc&state={state}",
+            ("meander_sid", authorized), ("meander_oauth", cookies["meander_oauth"]));
+        return (authorized, SetCookies(callback).GetValueOrDefault("meander_sid"), callback);
+    }
+
+    [Fact]
+    public async Task ARotatedSessionReplacesAPlantedSessionId()
+    {
+        await using var app = App();
+        using var client = Manual(app);
+        var planted = Guid.NewGuid().ToString();
+        var (authorized, final, callback) = await Connect(client, planted);
+        using var _ = callback;
+        Assert.NotEqual(planted, authorized);
+        Assert.NotNull(final);
+        Assert.NotEqual(planted, final);
+        Assert.NotEqual(authorized, final);
+        Assert.False(await IsConnected(client, planted));
+        Assert.True(await IsConnected(client, final));
+    }
+
+    [Fact]
+    public async Task RejectsACallbackFromAnotherSession()
+    {
+        await using var app = App();
+        using var client = Manual(app);
+        using var authorize = await Get(client, "/api/connections/garmin/authorize");
+        var cookies = SetCookies(authorize);
+        var state = QueryHelpers.ParseQuery(authorize.Headers.Location!.Query)["state"].ToString();
+        using var callback = await Get(client, $"/api/connections/garmin/callback?code=abc&state={state}",
+            ("meander_sid", Guid.NewGuid().ToString()), ("meander_oauth", cookies["meander_oauth"]));
+        Assert.Equal(HttpStatusCode.BadRequest, callback.StatusCode);
+        Assert.Equal("connectionStateInvalid", await Code(callback));
+        Assert.Empty(connector.Exchanges);
+    }
+
+    [Fact]
+    public async Task ConnectingAgainKeepsTheConnectionUnderTheNewSessionOnly()
+    {
+        await using var app = App();
+        using var client = Manual(app);
+        var (_, first, firstCallback) = await Connect(client, null);
+        firstCallback.Dispose();
+        var (authorized, second, secondCallback) = await Connect(client, first);
+        secondCallback.Dispose();
+        Assert.Equal(first, authorized);
+        Assert.NotNull(second);
+        Assert.NotEqual(first, second);
+        Assert.True(await IsConnected(client, second));
+        Assert.False(await IsConnected(client, first!));
     }
 
     [Fact]
