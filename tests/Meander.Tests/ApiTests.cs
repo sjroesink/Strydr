@@ -523,6 +523,22 @@ public sealed class ApiTests
     }
 
     [Fact]
+    public async Task ConfiguredClientIpHeaderGivesEachVisitorTheirOwnRateLimit()
+    {
+        await using var app = new ApiFactory(new(), new() { ["RateLimiting:GeocodePerMinute"] = "1", ["ReverseProxy:ClientIpHeader"] = "CF-Connecting-IP" });
+        using var client = app.CreateClient();
+        async Task<HttpStatusCode> Geocode(string ip)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/geocode?q=Utrecht");
+            request.Headers.Add("CF-Connecting-IP", ip);
+            return (await client.SendAsync(request)).StatusCode;
+        }
+        Assert.Equal(HttpStatusCode.OK, await Geocode("203.0.113.1"));
+        Assert.Equal(HttpStatusCode.OK, await Geocode("203.0.113.2"));
+        Assert.Equal(HttpStatusCode.TooManyRequests, await Geocode("203.0.113.1"));
+    }
+
+    [Fact]
     public async Task MissingExportAndUnknownApiAreProblemDetails()
     {
         await using var app = new ApiFactory(new());

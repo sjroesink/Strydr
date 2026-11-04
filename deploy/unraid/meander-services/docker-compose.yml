@@ -1,0 +1,67 @@
+# Unraid Compose Manager stack "meander-services": local routing, geocoding and woodland data.
+# Kept separate from the "meander" app stack, which the deploy webhook takes down and up on
+# every push; these services take minutes to load and rarely change.
+# Data lives in /mnt/user/appdata/meander/ (see README, "Deploy on Unraid").
+services:
+  ors:
+    image: openrouteservice/openrouteservice:v10.1.0
+    container_name: meander-ors
+    restart: unless-stopped
+    environment:
+      XMS: 1g
+      XMX: 4g
+      ors.engine.profile_default.build.source_file: /home/ors/files/netherlands-latest.osm.pbf
+      ors.engine.profile_default.build.elevation: "true"
+      ors.engine.profiles.driving-car.enabled: "false"
+      ors.engine.profiles.foot-walking.enabled: "true"
+      ors.engine.profiles.foot-walking.build.ext_storages.RoadAccessRestrictions.use_for_warnings: "true"
+    volumes:
+      - /mnt/user/appdata/meander/ors/files:/home/ors/files:ro
+      - /mnt/user/appdata/meander/ors/graphs:/home/ors/graphs
+      - /mnt/user/appdata/meander/ors/elevation_cache:/home/ors/elevation_cache
+    networks: [meander]
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8082/ors/v2/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30m
+
+  photon:
+    image: rtuszik/photon-docker:2.4.0
+    container_name: meander-photon
+    restart: unless-stopped
+    environment:
+      REGION: netherlands
+      UPDATE_STRATEGY: DISABLED
+    volumes:
+      - /mnt/user/appdata/meander/photon:/photon/data
+    networks: [meander]
+
+  overpass:
+    image: wiktorn/overpass-api:v0.7.62.11
+    container_name: meander-overpass
+    restart: unless-stopped
+    # Queries run through fcgiwrap as the nginx user, which must be able to enter /db.
+    entrypoint: ["/bin/sh", "-c", "chmod 755 /db && exec /docker-entrypoint.sh /app/docker-entrypoint.sh"]
+    environment:
+      OVERPASS_MODE: init
+      OVERPASS_META: "no"
+      OVERPASS_COMPRESSION: gz
+      OVERPASS_PLANET_URL: https://download.geofabrik.de/europe/netherlands-latest.osm.pbf
+      OVERPASS_PLANET_PREPROCESS: mv /db/planet.osm.bz2 /db/planet.osm.pbf && osmium cat -o /db/planet.osm.bz2 /db/planet.osm.pbf && rm /db/planet.osm.pbf
+      OVERPASS_USE_AREAS: "true"
+      OVERPASS_STOP_AFTER_INIT: "false"
+      OVERPASS_ALLOW_DUPLICATE_QUERIES: "yes"
+      OVERPASS_MAX_TIMEOUT: 60s
+    volumes:
+      - /mnt/user/appdata/meander/overpass:/db
+    networks: [meander]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost/api/interpreter?data=%5Bout:json%5D;node(1);out;' | grep -q '\"elements\"' || exit 1"]
+      interval: 60s
+      timeout: 10s
+      start_period: 3h
+
+networks:
+  meander:
+    name: meander

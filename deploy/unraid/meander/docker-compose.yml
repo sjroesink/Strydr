@@ -1,0 +1,36 @@
+# Unraid Compose Manager stack "meander": the app, redeployed by the deploy webhook on every
+# push to main (docker compose pull && down && up). Needs the "meander-services" stack, which
+# creates the shared "meander" network.
+services:
+  meander:
+    image: ghcr.io/sjroesink/meander:latest
+    container_name: meander
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "3118:8080"
+    environment:
+      AllowedHosts: "meander.roesink.dev;meander.sander.ninja;10.0.0.170;localhost"
+      # Cloudflare -> Traefik -> app: rate limits use the visitor's IP, not the proxy's.
+      ReverseProxy__ClientIpHeader: CF-Connecting-IP
+      ResultStorage__DatabasePath: /app/data/meander.sqlite
+      Ors__BaseUrl: http://meander-ors:8082/ors/
+      Ors__SupportsGreen: "false"
+      Ors__DirectionsPerMinute: "600"
+      Ors__SnapsPerMinute: "600"
+      Ors__GeocodingPerMinute: "600"
+      Geocoding__Provider: Photon
+      Photon__BaseUrl: http://meander-photon:2322/
+      Woodland__Url: http://meander-overpass/api/interpreter
+      Woodland__TimeoutSeconds: "15"
+      Woodland__MaxResponseMegabytes: "32"
+      MapData__Path: /app/map
+    volumes:
+      # Writable by the image's non-root user (uid 1654).
+      - /mnt/user/appdata/meander/data:/app/data
+      - /mnt/user/appdata/meander/map:/app/map:ro
+    networks: [meander]
+
+networks:
+  meander:
+    external: true

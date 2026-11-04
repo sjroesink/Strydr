@@ -4,6 +4,7 @@ using System.Threading.RateLimiting;
 using Meander.Core;
 using Meander.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.StaticFiles;
@@ -128,6 +129,19 @@ ConfigurationChecks.Validate(ors, generation);
 app.Services.GetRequiredService<IRouteSearchStore>();
 if (limits.GeneratePerMinute < 1 || limits.GeocodePerMinute < 1 || limits.PreviewPerMinute < 1 || limits.ConcurrentGenerations < 1)
     throw new InvalidOperationException("RateLimiting values must be positive integers.");
+// Behind Cloudflare and Traefik every request arrives from the proxy, which would make the
+// per-IP rate limits global. Trust the configured client IP header (e.g. CF-Connecting-IP).
+if (builder.Configuration["ReverseProxy:ClientIpHeader"] is { Length: > 0 } clientIpHeader)
+{
+    var forwarded = new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+        ForwardedForHeaderName = clientIpHeader
+    };
+    forwarded.KnownIPNetworks.Clear();
+    forwarded.KnownProxies.Clear();
+    app.UseForwardedHeaders(forwarded);
+}
 app.UseExceptionHandler();
 app.UseStatusCodePages(async context =>
 {

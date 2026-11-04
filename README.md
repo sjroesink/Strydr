@@ -90,6 +90,15 @@ Running natively instead of with Compose: start the ORS and Photon containers yo
 
 The options are independent: for example, keep hosted ORS with a key and replace only MapTiler with the local basemap.
 
+## Deploy on Unraid
+
+Production runs keyless at **https://meander.roesink.dev** (also `meander.sander.ninja`), via Cloudflare and Traefik (`D:\Projects\infra`, `publicServices.meander`, host port 3118). Two Compose Manager stacks, kept in `deploy/unraid/`:
+
+- `meander-services`: ORS, Photon and Overpass. Started manually; they take minutes to an hour to load and rarely change. It creates the shared `meander` network.
+- `meander`: the app image `ghcr.io/sjroesink/meander:latest`. `.github/workflows/deploy.yml` builds it on every push to `main` (with `VITE_PMTILES_URL=/map/netherlands.pmtiles`) and calls the deploy webhook, which pulls and restarts only this stack.
+
+Data lives in `/mnt/user/appdata/meander/`: `map/` (PMTiles and assets from `scripts/fetch-map-data`), `ors/files/` (OSM extract), `ors/graphs`, `ors/elevation_cache`, `photon/`, `overpass/` and `data/` (SQLite, owned by uid 1654 for the non-root app user). The app sets `ReverseProxy__ClientIpHeader=CF-Connecting-IP`, so per-IP rate limits apply to visitors rather than to the proxy; leave it unset when the app is reachable without Cloudflare.
+
 ## Configuration
 
 Backend defaults live in `src/Meander.Api/appsettings.json`; ignored `appsettings.Local.json` overrides them, and environment variables override both. Use double underscores for environment nesting, e.g. `Generation__DeadlineSeconds=60`.
@@ -125,6 +134,7 @@ Backend defaults live in `src/Meander.Api/appsettings.json`; ignored `appsetting
 | `RateLimiting:ConcurrentGenerations` | 2 | Process-wide generation limit; rejected requests are not queued |
 | `RateLimiting:GeocodePerMinute` | 60 | Per-IP incoming autocomplete limit |
 | `RateLimiting:PreviewPerMinute` | 30 | Per-IP incoming drawn-section previews |
+| `ReverseProxy:ClientIpHeader` | empty | Header holding the visitor IP behind a trusted proxy (e.g. `CF-Connecting-IP`); used for per-IP rate limits |
 | `AllowedHosts` | `localhost;127.0.0.1` | Accepted hostnames; Compose also allows its internal `api` hostname |
 
 Provider HTTP calls have a 30-second total timeout across retries. Generation has its own overall deadline. `Retry-After` is honored within those deadlines. A local outbound-budget rejection does not itself consume retries. The configured provider URL supports HTTPS and HTTP, including internal HTTP addresses for a future self-hosted routing container.
