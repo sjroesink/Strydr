@@ -143,7 +143,7 @@ public sealed class OrsProvider(HttpClient client, ActivityProfiles profiles, Or
         _ => null
     };
 
-    public async Task<IReadOnlyList<GeocodeSuggestion>> SearchAsync(string query, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<GeocodeSuggestion>> SearchAsync(string query, string? language, CancellationToken cancellationToken)
     {
         using var response = await SendAsync(client, HttpMethod.Get, $"geocode/autocomplete?text={Uri.EscapeDataString(query)}&size=5", null, cancellationToken);
         using var json = await ReadAsync(response, cancellationToken);

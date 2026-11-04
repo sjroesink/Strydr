@@ -50,6 +50,7 @@ internal sealed class StubOrs : HttpMessageHandler
     public int MaxConcurrency;
     private int active;
     public readonly ConcurrentBag<(string Path, string? Authorization, JsonElement? Body)> Requests = [];
+    public readonly ConcurrentBag<string> Queries = [];
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -62,6 +63,7 @@ internal sealed class StubOrs : HttpMessageHandler
             var path = request.RequestUri!.AbsolutePath;
             JsonElement? body = request.Content is null ? null : JsonDocument.Parse(await request.Content.ReadAsStringAsync(cancellationToken)).RootElement.Clone();
             Requests.Add((path, request.Headers.TryGetValues("Authorization", out var values) ? values.Single() : null, body));
+            Queries.Add(request.RequestUri!.Query);
             if (DelayMs > 0) await Task.Delay(DelayMs, cancellationToken);
             if (path.Contains("/snap/") && MalformedSnap) return Json(new { unexpected = true });
             if (path.Contains("/snap/")) return Json(new { locations = body!.Value.GetProperty("locations").EnumerateArray().Select(point =>
@@ -341,6 +343,18 @@ public sealed class ApiTests
         var request = Assert.Single(upstream.Requests);
         Assert.Null(request.Authorization);
         Assert.Equal("/api", request.Path);
+    }
+
+    [Fact]
+    public async Task PhotonUsesTheRequestedLanguageOverTheConfiguredOne()
+    {
+        var upstream = new StubOrs();
+        await using var app = new ApiFactory(upstream, new() { ["Geocoding:Provider"] = "Photon", ["Photon:BaseUrl"] = "http://photon:2322/", ["Photon:Language"] = "en" });
+        using var client = app.CreateClient();
+        await client.GetFromJsonAsync<JsonElement>("/api/geocode?q=Utrecht&lang=nl");
+        Assert.Contains("lang=nl", Assert.Single(upstream.Queries));
+        await client.GetFromJsonAsync<JsonElement>("/api/geocode?q=Utrecht&lang=xx");
+        Assert.Contains(upstream.Queries, q => q.Contains("lang=en"));
     }
 
     [Theory] [InlineData(500, 503)] [InlineData(400, 502)]

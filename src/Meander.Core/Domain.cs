@@ -67,7 +67,8 @@ public interface IRoutingProvider
 }
 public interface IGeocodingProvider
 {
-    Task<IReadOnlyList<GeocodeSuggestion>> SearchAsync(string query, CancellationToken cancellationToken);
+    // Language is a UI language hint (nl or en); providers without language support ignore it.
+    Task<IReadOnlyList<GeocodeSuggestion>> SearchAsync(string query, string? language, CancellationToken cancellationToken);
 }
 public interface ICandidateStore
 {

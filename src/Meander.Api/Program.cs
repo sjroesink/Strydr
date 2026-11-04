@@ -209,13 +209,13 @@ app.MapPost("/api/routes/save", (RouteRequest request, RouteEditor editor, IRout
     context.Response.Headers.CacheControl = "no-store";
     return Results.Ok(saved.Candidates);
 }).RequireRateLimiting("preview");
-app.MapGet("/api/geocode", async (string? q, IGeocodingProvider geocoder, CancellationToken ct) =>
+app.MapGet("/api/geocode", async (string? q, string? lang, IGeocodingProvider geocoder, CancellationToken ct) =>
 {
     var text = q?.Trim() ?? "";
     if (text.Length is < 3 or > 200)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["q"] = ["Search must contain 3–200 characters."] },
             extensions: new Dictionary<string, object?> { ["code"] = "searchQueryLength" });
-    return Results.Ok(await geocoder.SearchAsync(text, ct));
+    return Results.Ok(await geocoder.SearchAsync(text, lang is "nl" or "en" ? lang : null, ct));
 }).RequireRateLimiting("geocode");
 app.MapGet("/api/routes/{id:guid}/gpx", (Guid id, ICandidateStore store, HttpContext context) =>
 {

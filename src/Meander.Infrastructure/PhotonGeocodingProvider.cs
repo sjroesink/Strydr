@@ -7,12 +7,13 @@ namespace Meander.Infrastructure;
 // Self-hostable OSM geocoder (https://github.com/komoot/photon), built for search-as-you-type.
 public sealed class PhotonGeocodingProvider(HttpClient client, PhotonOptions options) : IGeocodingProvider
 {
-    public async Task<IReadOnlyList<GeocodeSuggestion>> SearchAsync(string query, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<GeocodeSuggestion>> SearchAsync(string query, string? language, CancellationToken cancellationToken)
     {
         // One place is often several OSM objects (station node, building, platforms) with the
         // same label; over-fetch and keep the first of each label.
         var path = $"api?q={Uri.EscapeDataString(query)}&limit=15";
-        if (!string.IsNullOrWhiteSpace(options.Language)) path += $"&lang={Uri.EscapeDataString(options.Language.Trim())}";
+        var lang = (language ?? options.Language)?.Trim();
+        if (!string.IsNullOrWhiteSpace(lang)) path += $"&lang={Uri.EscapeDataString(lang)}";
         using var response = await SendAsync(client, HttpMethod.Get, path, null, cancellationToken);
         using var json = await ReadAsync(response, cancellationToken);
         return Parse(() => json.RootElement.GetProperty("features").EnumerateArray().Select(feature =>
