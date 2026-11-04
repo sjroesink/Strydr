@@ -1,3 +1,4 @@
+import type { Language } from './i18n';
 import type { ApiProblem, RouteCandidate, RouteEditSession, RoutePreviewRequest, RouteRequest, SavedRouteSearch, Suggestion } from './types';
 
 export class ApiError extends Error {
@@ -23,8 +24,8 @@ export async function generate(request: RouteRequest, signal: AbortSignal): Prom
   }));
   return response.json() as Promise<RouteCandidate[]>;
 }
-export async function geocode(query: string, signal: AbortSignal): Promise<Suggestion[]> {
-  return (await checked(await fetch(`/api/geocode?q=${encodeURIComponent(query)}`, { signal }))).json() as Promise<Suggestion[]>;
+export async function geocode(query: string, language: Language, signal: AbortSignal): Promise<Suggestion[]> {
+  return (await checked(await fetch(`/api/geocode?q=${encodeURIComponent(query)}&lang=${language}`, { signal }))).json() as Promise<Suggestion[]>;
 }
 export async function loadSearch(id: string, signal: AbortSignal): Promise<SavedRouteSearch> {
   return (await checked(await fetch(`/api/searches/${encodeURIComponent(id)}`, { signal }))).json() as Promise<SavedRouteSearch>;

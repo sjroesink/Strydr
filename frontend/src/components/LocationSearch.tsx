@@ -21,7 +21,7 @@ export function LocationSearch({ label, value, place, placeholder, onTextChange,
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setSearching(true);
-      void geocode(value.trim(), controller.signal).then(results => {
+      void geocode(value.trim(), 'en', controller.signal).then(results => {
         if (!controller.signal.aborted) { setSuggestions(results); if (!results.length) setError('No places found. Try another search or use the map.'); }
       }).catch((ex: unknown) => {
         if (!controller.signal.aborted) setError(ex instanceof Error ? ex.message : 'Search is unavailable. Try the map.');

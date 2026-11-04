@@ -17,7 +17,7 @@ export type RouteCandidate = {
   id: string; expiresAt: string | null; searchId?: string | null; geometry: { type: 'LineString'; coordinates: number[][] };
   distanceKm: number; elevationGainM: number | null; maxDistanceFromStartKm: number; score: number;
   status: 'qualified' | 'bestEffort' | 'diagnostic'; start: EndpointInfo; end: EndpointInfo;
-  warnings: { code: string; message: string }[];
+  warnings: RouteWarning[];
   greenScore?: number | null; unpavedPercent?: number | null; surfaceKnownPercent?: number | null;
   woodlandPercent?: number | null;
   snappedPoints?: Location[] | null;
@@ -28,7 +28,9 @@ export type SavedRouteSearch = {
   drawnPoints: Location[]; drawnPreview: RouteCandidate | null;
 };
 export type RouteEditSession = { preview: RouteCandidate; request: RouteRequest; points: Location[]; isLoop: boolean };
+export type RouteWarning = { code: string; message: string; params?: Record<string, number> | null };
 export type ApiProblem = {
+  code?: string; params?: Record<string, number>;
   title?: string; detail?: string; status?: number; errors?: Record<string, string[]>;
   minimumDistanceKm?: number; traceId?: string;
 };

@@ -42,7 +42,7 @@ it('aborts obsolete searches and ignores their late responses', async () => {
   vi.mocked(geocode).mockReturnValueOnce(new Promise(done => { resolve = done; })).mockResolvedValueOnce([]);
   render(<Search />); await userEvent.type(screen.getByRole('combobox'), 'Utrecht');
   await waitFor(() => expect(geocode).toHaveBeenCalledTimes(1));
-  const signal = vi.mocked(geocode).mock.calls[0][1];
+  const signal = vi.mocked(geocode).mock.calls[0][2];
   await userEvent.type(screen.getByRole('combobox'), ' station');
   expect(signal.aborted).toBe(true);
   await act(async () => { resolve([suggestion]); });
