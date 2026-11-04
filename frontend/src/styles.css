@@ -368,6 +368,7 @@ button svg { flex-shrink:0; }
 .route-warnings { margin:0; padding-left:16px; font-size:13px; line-height:1.5; color:var(--warning-ink); }
 .route-warnings li+li { margin-top:4px; }
 .route-card-actions { display:grid; grid-template-columns:1fr 1.4fr; gap:8px; margin-top:auto; }
+.route-card-more { display:flex; flex-wrap:wrap; gap:4px 18px; margin-top:4px; }
 .route-action {
   display:flex; align-items:center; justify-content:center; gap:8px; min-height:48px; padding:0 12px; border-radius:14px;
   border:1px solid var(--line); font-size:15px; font-weight:600;
@@ -521,7 +522,7 @@ button svg { flex-shrink:0; }
   .candidate-list { flex-direction:column; overflow:visible; margin:0; padding:0; scroll-snap-type:none; gap:10px; }
   .route-card { flex:none; padding:16px; }
   .route-card:not(.selected) { gap:10px; }
-  .route-card:not(.selected) :is(.route-card-actions, .route-quality, .route-warnings) { display:none; }
+  .route-card:not(.selected) :is(.route-card-actions, .route-card-more, .route-quality, .route-warnings) { display:none; }
   .route-card:not(.selected) .route-stats dd { font-size:16px; }
 }
 @media (min-width:1500px) {

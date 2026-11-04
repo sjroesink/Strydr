@@ -1,13 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import { ApiError, downloadGpx, editRoute, generate, loadSearch, previewRoute, saveRoute } from './api';
+import { ApiError, disconnect, downloadFit, downloadGpx, editRoute, generate, listConnections, loadSearch, previewRoute, saveRoute, sendRoute } from './api';
 import { candidate } from './test/fixtures';
 import type { Location, SavedRouteSearch } from './types';
 
 vi.mock('./api', async importOriginal => {
   const actual = await importOriginal<typeof import('./api')>();
-  return { ...actual, generate: vi.fn(), editRoute: vi.fn(), saveRoute: vi.fn(), loadSearch: vi.fn(), previewRoute: vi.fn(), downloadGpx: vi.fn(), geocode: vi.fn().mockResolvedValue([]) };
+  return { ...actual, generate: vi.fn(), editRoute: vi.fn(), saveRoute: vi.fn(), loadSearch: vi.fn(), previewRoute: vi.fn(), downloadGpx: vi.fn(), downloadFit: vi.fn(), sendRoute: vi.fn(), disconnect: vi.fn(), listConnections: vi.fn(), geocode: vi.fn().mockResolvedValue([]) };
 });
 vi.mock('./components/RouteMap', () => ({
   ROUTE_COLORS: ['#d3733c', '#466bc3', '#9363a9'],
@@ -33,6 +33,8 @@ afterEach(() => { window.localStorage.removeItem('meander.language'); });
 beforeEach(() => {
   window.localStorage.removeItem('meander.language');
   vi.mocked(generate).mockReset(); vi.mocked(downloadGpx).mockReset();
+  vi.mocked(downloadFit).mockReset(); vi.mocked(sendRoute).mockReset(); vi.mocked(disconnect).mockReset();
+  vi.mocked(listConnections).mockReset().mockResolvedValue([]);
   vi.mocked(previewRoute).mockReset();
   vi.mocked(loadSearch).mockReset();
   vi.mocked(editRoute).mockReset(); vi.mocked(saveRoute).mockReset();
@@ -258,6 +260,14 @@ it('creates a loop, selects and highlights candidates, and downloads GPX', async
   expect(screen.getByTestId('highlighted')).toHaveTextContent('route-2');
   await userEvent.click(screen.getAllByRole('button', { name: /Download GPX/ })[1]);
   expect(downloadGpx).toHaveBeenCalledWith(expect.objectContaining({ id: 'route-2' }), expect.any(AbortSignal));
+});
+
+it('downloads a FIT course for the chosen route', async () => {
+  vi.mocked(generate).mockResolvedValue([candidate(1), candidate(2)]);
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  await userEvent.click(await screen.findByRole('button', { name: /Route 2/ }));
+  await userEvent.click(screen.getAllByRole('button', { name: /Download FIT/ })[1]);
+  expect(downloadFit).toHaveBeenCalledWith(expect.objectContaining({ id: 'route-2' }), expect.any(AbortSignal));
 });
 
 it('supports a different end, walking, and a radius', async () => {

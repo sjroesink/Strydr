@@ -112,6 +112,7 @@ export const en = {
   'route.editLabel': 'Edit route {n}',
   'route.preparing': 'Preparing…',
   'route.download': 'Download GPX',
+  'route.downloadFit': 'Download FIT',
   'edit.updating': 'Updating…',
   'edit.cancel': 'Cancel editing',
   'edit.save': 'Save',

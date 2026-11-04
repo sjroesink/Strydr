@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ApiError, downloadGpx, editRoute, generate, loadSearch, previewRoute, saveRoute } from './api';
+import { ApiError, downloadFit, downloadGpx, editRoute, generate, loadSearch, previewRoute, saveRoute } from './api';
 import { LocationSearch } from './components/LocationSearch';
 import RouteMap, { ROUTE_COLORS, type MapMarkerTarget, type MapPadding } from './components/RouteMap';
 import type { Activity, Location, Place, RouteCandidate } from './types';
@@ -562,11 +562,11 @@ function Planner() {
       if (id && id !== selectedId) selectRoute(id);
     }, 140);
   }
-  async function exportRoute(candidate: RouteCandidate) {
+  async function exportRoute(candidate: RouteCandidate, format: 'gpx' | 'fit' = 'gpx') {
     exportingController.current?.abort();
     const controller = new AbortController(); exportingController.current = controller;
     setExporting(candidate.id); setError([]);
-    try { await downloadGpx(candidate, controller.signal); }
+    try { await (format === 'fit' ? downloadFit : downloadGpx)(candidate, controller.signal); }
     catch (ex) {
       if (!controller.signal.aborted) setError(ex instanceof ApiError && ex.problem.status === 404
         ? [{ key: 'errors.exportExpired' }] : failureMessages(ex, 'error.exportFailed', number));
@@ -760,6 +760,10 @@ function Planner() {
                   <Icon name="edit" />{t('route.edit')}</button>
                 <button type="button" className="route-action route-action-download" disabled={exporting !== null} onClick={() => void exportRoute(candidate)}>
                   <Icon name="download" />{exporting === candidate.id ? t('route.preparing') : t('route.download')}</button>
+              </div>
+              <div className="route-card-more">
+                <button type="button" className="text-link" disabled={exporting !== null} onClick={() => void exportRoute(candidate, 'fit')}>
+                  <Icon name="download" />{t('route.downloadFit')}</button>
               </div>
             </li>;
           })}</ul>

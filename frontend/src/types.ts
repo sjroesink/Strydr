@@ -34,3 +34,7 @@ export type ApiProblem = {
   title?: string; detail?: string; status?: number; errors?: Record<string, string[]>;
   minimumDistanceKm?: number; traceId?: string;
 };
+
+export type ServiceKind = 'garmin';
+export type ServiceConnectionStatus = { service: ServiceKind; connected: boolean };
+export type SentRoute = { externalId: string; viewUrl: string | null };

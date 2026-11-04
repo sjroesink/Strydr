@@ -113,6 +113,7 @@ export const nl: Record<keyof typeof en, string> = {
   'route.editLabel': 'Route {n} bewerken',
   'route.preparing': 'Voorbereiden…',
   'route.download': 'GPX downloaden',
+  'route.downloadFit': 'FIT downloaden',
   'edit.updating': 'Bijwerken…',
   'edit.cancel': 'Bewerken annuleren',
   'edit.save': 'Opslaan',
