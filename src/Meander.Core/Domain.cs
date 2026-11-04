@@ -109,7 +109,7 @@ public sealed class RouteValidationException(string code, string message,
     public double? MinimumDistanceKm { get; } = minimumDistanceKm;
     public IReadOnlyDictionary<string, double>? Params { get; } = parameters;
 }
-public enum ProviderFailure { Unavailable, Throttled, Timeout, InvalidResponse, NoRoute }
+public enum ProviderFailure { Unavailable, Throttled, Timeout, InvalidResponse, NoRoute, Unauthorized }
 public sealed class ProviderException(ProviderFailure failure, string message, Exception? inner = null)
     : Exception(message, inner)
 {
@@ -125,6 +125,7 @@ public static class ProviderFailures
         ProviderFailure.Timeout => "timeout",
         ProviderFailure.Throttled => "throttled",
         ProviderFailure.InvalidResponse => "invalidResponse",
+        ProviderFailure.Unauthorized => "unauthorized",
         _ => "unavailable"
     };
 }

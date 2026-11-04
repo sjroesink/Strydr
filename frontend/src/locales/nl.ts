@@ -204,6 +204,7 @@ export const nl: Record<keyof typeof en, string> = {
   'errors.invalidResponse': 'De routeservice gaf een ongeldig antwoord.',
   'errors.unavailable': 'De routeservice is tijdelijk niet beschikbaar. Probeer het zo opnieuw.',
   'errors.throttled': 'De routeservice heeft zijn limiet bereikt. Probeer het zo opnieuw.',
+  'errors.unauthorized': 'De koppeling is verlopen. Koppel opnieuw.',
   'errors.malformedRequest': 'Het verzoek kon niet worden gelezen. Herlaad de pagina en probeer het opnieuw.',
   'errors.serverError': 'Er ging iets mis. Probeer het zo opnieuw.',
   'errors.tooManyRequests': 'Wacht even voordat je het opnieuw probeert.',

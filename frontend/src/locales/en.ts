@@ -203,6 +203,7 @@ export const en = {
   'errors.invalidResponse': 'The routing service returned an invalid response.',
   'errors.unavailable': 'The routing service is temporarily unavailable. Try again shortly.',
   'errors.throttled': 'The routing service is at its request limit. Try again shortly.',
+  'errors.unauthorized': 'The connection has expired. Connect again.',
   'errors.malformedRequest': 'The request could not be read. Reload the page and try again.',
   'errors.serverError': 'Something went wrong. Please try again shortly.',
   'errors.tooManyRequests': 'Please wait before trying again.',
