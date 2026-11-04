@@ -73,7 +73,7 @@ services:
       Woodland__Url: http://overpass/api/interpreter
       Woodland__TimeoutSeconds: "15"
       # A private instance can return whole town areas (~10 MB around Hengelo at an 8 km radius).
-      Woodland__MaxResponseMegabytes: "32"
+      Woodland__MaxResponseMegabytes: "64"
     volumes:
       - ./data/map:/app/map:ro
     depends_on:

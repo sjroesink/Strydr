@@ -128,7 +128,7 @@ Backend defaults live in `src/Meander.Api/appsettings.json`; ignored `appsetting
 | `Woodland:Url` | `https://overpass-api.de/api/interpreter` | OSM woodland/path lookup; replace with a hosted or local Overpass endpoint |
 | `Woodland:MaxSearchRadiusKm` | 12 | Maximum woodland search radius; cached queries include a 1 km centre-rounding margin |
 | `Woodland:TimeoutSeconds` | 10 | Time budget for optional woodland lookup, including queued requests |
-| `Woodland:MaxResponseMegabytes` | 8 | Woodland response cap (query memory and element limits scale with it); `compose.local.yaml` uses 32 because dense towns exceed 8 MB at large radii |
+| `Woodland:MaxResponseMegabytes` | 8 | Woodland response cap (query memory and element limits scale with it); `compose.local.yaml` and the Unraid stack use 64 because nature polygons and paths together exceed 32 MB at large radii |
 | `Woodland:CacheHours` | 12 | Lifetime of successful area lookups in a separate 32 MiB memory cache |
 | `RateLimiting:GeneratePerMinute` | 3 | Per-IP incoming generation limit |
 | `RateLimiting:ConcurrentGenerations` | 2 | Process-wide generation limit; rejected requests are not queued |

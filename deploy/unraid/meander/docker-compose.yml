@@ -28,7 +28,7 @@ services:
       Photon__BaseUrl: http://meander-photon:2322/
       Woodland__Url: http://meander-overpass/api/interpreter
       Woodland__TimeoutSeconds: "15"
-      Woodland__MaxResponseMegabytes: "32"
+      Woodland__MaxResponseMegabytes: "64"
       MapData__Path: /app/map
     volumes:
       # Writable by the image's non-root user (uid 1654).
