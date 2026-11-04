@@ -28,7 +28,7 @@ vi.mock('./components/RouteMap', () => ({
   </div>,
 }));
 
-afterEach(() => { window.localStorage.removeItem('meander.language'); });
+afterEach(() => { window.localStorage.removeItem('meander.language'); window.sessionStorage.clear(); });
 
 beforeEach(() => {
   window.localStorage.removeItem('meander.language');
@@ -612,7 +612,39 @@ it('links to Garmin when it is not connected yet', async () => {
   expect(sendRoute).not.toHaveBeenCalled();
 });
 
+const intend = (routeId: string, at = Date.now()) =>
+  window.sessionStorage.setItem('meander.pendingSend', JSON.stringify({ service: 'garmin', routeId, at }));
+const craftedReturn = () => {
+  window.history.replaceState(null, '', '/routes/search-1?route=route-1&send=garmin&connected=garmin');
+  vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  vi.mocked(sendRoute).mockResolvedValue({ externalId: '1', viewUrl: null });
+};
+
+it('does not send for a crafted return without a remembered intent', async () => {
+  craftedReturn();
+  render(<App />);
+  expect(await screen.findByText('Garmin connected')).toBeInTheDocument();
+  expect(sendRoute).not.toHaveBeenCalled();
+});
+
+it('does not send a stale intent', async () => {
+  craftedReturn(); intend('route-1', Date.now() - 16 * 60 * 1000);
+  render(<App />);
+  expect(await screen.findByText('Garmin connected')).toBeInTheDocument();
+  expect(sendRoute).not.toHaveBeenCalled();
+  expect(window.sessionStorage.getItem('meander.pendingSend')).toBeNull();
+});
+
+it('sends the remembered route even when the URL names another', async () => {
+  craftedReturn(); intend('route-2');
+  render(<App />);
+  await waitFor(() => expect(sendRoute).toHaveBeenCalledWith('route-2', 'garmin', expect.any(AbortSignal)));
+  expect(sendRoute).toHaveBeenCalledTimes(1);
+});
+
 it('sends the route automatically after returning from Garmin', async () => {
+  intend('route-2');
   window.history.replaceState(null, '', '/routes/search-1?route=route-2&send=garmin&connected=garmin');
   vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
   vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);

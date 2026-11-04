@@ -4,7 +4,7 @@ import { LocationSearch } from './components/LocationSearch';
 import RouteMap, { ROUTE_COLORS, type MapMarkerTarget, type MapPadding } from './components/RouteMap';
 import type { Activity, Location, Place, RouteCandidate, ServiceKind } from './types';
 import { ConnectionsPanel } from './components/ConnectionsPanel';
-import { readConnectReturn } from './connectReturn';
+import { readConnectReturn, rememberSendIntent, takeSendIntent } from './connectReturn';
 import { SERVICE_NAMES, useConnections } from './useConnections';
 import { insertionIndex as findInsertionIndex } from './routeEditing';
 import { Icon } from './components/Icon';
@@ -598,12 +598,14 @@ function Planner() {
   useEffect(() => {
     if (!connectReturn || phase !== 'done') return;
     setConnectReturn(null);
+    const intended = takeSendIntent(connectReturn.service);
     if (connectReturn.failed) { setError([{ key: 'errors.connectDenied' }]); return; }
-    const route = candidates.find(item => item.id === selectedId);
-    if (!connectReturn.send) return;
+    // Only a route the visitor chose before connecting is sent; the URL alone is never enough.
+    if (!connectReturn.send || !intended) return;
+    const route = candidates.find(item => item.id === intended);
     if (route) void sendToService(route, connectReturn.service);
     else setError([{ key: 'errors.routeNotFound' }]);
-  }, [connectReturn, phase, candidates, selectedId]);
+  }, [connectReturn, phase, candidates]);
 
   const km = Number(distance);
   const distanceValid = Number.isFinite(km) && km >= .5 && km <= MAX_DISTANCE;
@@ -800,7 +802,7 @@ function Planner() {
                   const label = <><Icon name="send" />{sending === candidate.id ? t('route.sending') : t('route.sendTo', { service: SERVICE_NAMES[service] })}</>;
                   return connected
                     ? <button key={service} type="button" className="text-link" disabled={sending !== null} onClick={() => void sendToService(candidate, service)}>{label}</button>
-                    : <a key={service} className="text-link" href={connectUrl(service, `${savedSearchPath(candidate.searchId!, candidate.id)}&send=${service}`)}>{label}</a>;
+                    : <a key={service} className="text-link" onClick={() => rememberSendIntent(service, candidate.id)} href={connectUrl(service, `${savedSearchPath(candidate.searchId!, candidate.id)}&send=${service}`)}>{label}</a>;
                 })}
               </div>
             </li>;
