@@ -41,12 +41,21 @@ public sealed class GarminCourseDestination(HttpClient http, GarminOptions optio
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             throw new ProviderException(ProviderFailure.Unauthorized, "Garmin rejected the connection.");
         if (!response.IsSuccessStatusCode)
-            throw new ProviderException(ProviderFailure.Unavailable, $"Garmin rejected the course ({(int)response.StatusCode}).");
+            throw new ProviderException(ProviderFailure.Unavailable,
+                $"Garmin rejected the course ({(int)response.StatusCode}): {await ReasonAsync(response, ct)}");
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
         var id = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("courseId", out var value)
             ? value.ValueKind switch { JsonValueKind.String => value.GetString(), JsonValueKind.Number => value.GetRawText(), _ => null } : null;
         if (string.IsNullOrEmpty(id))
             throw new ProviderException(ProviderFailure.InvalidResponse, "Garmin returned no course id.");
         return new SentRoute(id, new Uri($"https://connect.garmin.com/modern/course/{Uri.EscapeDataString(id)}"));
+    }
+
+    // Garmin's error body explains which course field it rejected; keep it short and on one line for the log.
+    private static async Task<string> ReasonAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        var body = await response.Content.ReadAsStringAsync(ct);
+        var line = string.Join(' ', body.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return line.Length == 0 ? "no details" : line.Length > 300 ? line[..300] + "…" : line;
     }
 }

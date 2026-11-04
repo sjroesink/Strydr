@@ -170,7 +170,8 @@ public static class ConnectionEndpoints
                                        ex is TaskCanceledException && !ct.IsCancellationRequested)
             {
                 logger.LogWarning("Sending a route to {Service} failed: {Failure}", connector.Service, Describe(ex));
-                return Results.Problem(statusCode: 502, title: "Service unavailable",
+                // 503, not 502: Cloudflare replaces origin 502 responses with its own HTML page.
+                return Results.Problem(statusCode: 503, title: "Service unavailable",
                     detail: $"{connector.Service} did not accept the route. Try again shortly.", extensions: Code("serviceUnavailable"));
             }
         }).RequireRateLimiting("connect");

@@ -16,6 +16,7 @@ internal sealed class StubGarmin : HttpMessageHandler
     public HttpStatusCode CourseStatus { get; set; } = HttpStatusCode.OK;
     public HttpStatusCode UserIdStatus { get; set; } = HttpStatusCode.OK;
     public object CourseResponse { get; set; } = new { courseId = 987654 };
+    public string? CourseErrorBody { get; set; }
     public bool RefreshReturnsNonJson { get; set; }
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
@@ -33,7 +34,8 @@ internal sealed class StubGarmin : HttpMessageHandler
         }
         if (path.EndsWith("/user/id")) return UserIdStatus != HttpStatusCode.OK ? new(UserIdStatus) : Json(new { userId = "garmin-user-1" });
         if (path.EndsWith("/user/registration")) return new(HttpStatusCode.NoContent);
-        if (path.EndsWith("/course")) return CourseStatus == HttpStatusCode.OK ? Json(CourseResponse) : new(CourseStatus);
+        if (path.EndsWith("/course")) return CourseStatus == HttpStatusCode.OK ? Json(CourseResponse)
+            : new(CourseStatus) { Content = CourseErrorBody is null ? null : new StringContent(CourseErrorBody, System.Text.Encoding.UTF8, "application/json") };
         return new(HttpStatusCode.NotFound);
     }
     private static HttpResponseMessage Json(object value) => new(HttpStatusCode.OK) { Content = JsonContent.Create(value) };
@@ -220,11 +222,12 @@ public sealed class GarminTests
     }
 
     [Fact]
-    public async Task ACourseResponseWithoutACourseIdIsABadGateway()
+    public async Task ACourseResponseWithoutACourseIdIsServiceUnavailable()
     {
         garmin.CourseResponse = new { courseId = (string?)null };
         using var sent = await SendRoute();
-        Assert.Equal(HttpStatusCode.BadGateway, sent.StatusCode);
+        // Not 502: Cloudflare replaces origin 502 responses with its own HTML page.
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, sent.StatusCode);
         Assert.Equal("serviceUnavailable", (await sent.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
     }
 
@@ -233,8 +236,23 @@ public sealed class GarminTests
     {
         garmin.CourseStatus = HttpStatusCode.InternalServerError;
         using var sent = await SendRoute();
-        Assert.Equal(HttpStatusCode.BadGateway, sent.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, sent.StatusCode);
         Assert.Single(garmin.Requests, r => r.Url.EndsWith("/course"));
+    }
+
+    [Fact]
+    public async Task RejectedCoursesCarryGarminsReasonWithoutTokens()
+    {
+        garmin.CourseStatus = HttpStatusCode.BadRequest;
+        garmin.CourseErrorBody = "{\"errorMessage\":\"activityType WALKING is not supported\"}\n" + new string('x', 1000);
+        var destination = new GarminCourseDestination(new HttpClient(garmin), new GarminOptions { ClientId = "c", ClientSecret = "s" });
+        var failure = await Assert.ThrowsAsync<ProviderException>(() =>
+            destination.SendAsync(Fixtures.Candidate(), Activity.Walking, new("secret-token", null, DateTimeOffset.UtcNow.AddHours(1), "u"), default));
+        Assert.Contains("(400)", failure.Message);
+        Assert.Contains("activityType WALKING is not supported", failure.Message);
+        Assert.DoesNotContain("secret-token", failure.Message);
+        Assert.DoesNotContain("\n", failure.Message);
+        Assert.True(failure.Message.Length < 400);
     }
 
     [Fact]
