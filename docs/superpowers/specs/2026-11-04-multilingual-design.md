@@ -41,17 +41,14 @@ The toggle is a two-button group (`NL`, `EN`) with `aria-pressed`, styled like `
 
 ### Warnings
 
-`RouteWarning` gains an optional `Params` dictionary (`IReadOnlyDictionary<string, double>?`). Each warning that embeds numbers in its message sends them as parameters too:
+`RouteWarning` gains an optional `Params` dictionary (`IReadOnlyDictionary<string, double>?`). Only warnings the UI shows need translating; the hidden ones (`backtrackingRemoved`, `surfaceDataIncomplete`, `distanceMiss`, `qualityDataUnavailable`, `woodlandUnavailable`) keep their English message only. Shown warnings that embed numbers send them as parameters too:
 
 | Code | Params |
 |---|---|
-| `backtrackingRemoved` | `km` |
 | `drawnPointSnapped` | `meters` |
 | `startSnapped`, `endSnapped` | `meters` |
 | `fewerRoutes` | `found`, `requested` |
-| `surfaceDataIncomplete` | `percent` |
-| `distanceMiss` | `km`, `minKm`, `maxKm` |
-| `radiusExceeded` | `km`, `radiusKm` (generation); none (editing) |
+| `radiusExceeded` | `km`, `radiusKm` (generation); `edited: 1` (route editor) |
 
 `message` stays in English. The frontend translates by `code` and falls back to `message` when the code is unknown, or when a code that needs parameters arrives without them (saved searches from before this change).
 
