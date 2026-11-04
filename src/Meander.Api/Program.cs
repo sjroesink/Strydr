@@ -32,6 +32,8 @@ var photon = new PhotonOptions();
 var mapData = new MapDataOptions();
 var connectionOptions = new ConnectionOptions();
 builder.Services.AddSingleton(connectionOptions);
+var garmin = new GarminOptions();
+builder.Services.AddSingleton(garmin);
 
 builder.Services.AddSingleton(ors);
 builder.Services.AddSingleton(photon);
@@ -46,6 +48,11 @@ builder.Services.AddSingleton<ICandidateStore, CandidateStore>();
 builder.Services.AddSingleton<IRouteSearchStore, SqliteRouteSearchStore>();
 builder.Services.AddSingleton<IConnectionStore, SqliteConnectionStore>();
 builder.Services.AddTransient<ConnectionService>();
+// Garmin calls are never retried: authorization codes are single-use and courses must not duplicate.
+builder.Services.AddHttpClient<GarminConnector>(client => { client.Timeout = TimeSpan.FromSeconds(20); client.DefaultRequestHeaders.UserAgent.ParseAdd("Meander/1.0"); });
+builder.Services.AddHttpClient<GarminCourseDestination>(client => { client.Timeout = TimeSpan.FromSeconds(20); client.DefaultRequestHeaders.UserAgent.ParseAdd("Meander/1.0"); });
+builder.Services.AddTransient<IServiceConnector>(sp => sp.GetRequiredService<GarminConnector>());
+builder.Services.AddTransient<IRouteDestination>(sp => sp.GetRequiredService<GarminCourseDestination>());
 builder.Services.AddDataProtection().SetApplicationName("Meander");
 // Resolved lazily so test hosts can point the key ring elsewhere.
 builder.Services.AddOptions<KeyManagementOptions>().Configure<IConfiguration, IHostEnvironment>((o, config, env) =>
@@ -125,6 +132,8 @@ builder.Configuration.GetSection("Woodland").Bind(woodland);
 builder.Configuration.GetSection("Geocoding").Bind(geocoding);
 builder.Configuration.GetSection("Photon").Bind(photon);
 builder.Configuration.GetSection("MapData").Bind(mapData);
+builder.Configuration.GetSection("Integrations:Garmin").Bind(garmin);
+garmin.Validate();
 connectionOptions.PublicBaseUrl = builder.Configuration["PublicBaseUrl"] ?? "";
 if (geocoding.Provider == GeocodingProviderKind.Photon &&
     (!Uri.TryCreate(photon.BaseUrl, UriKind.Absolute, out var photonUrl) || photonUrl.Scheme is not ("http" or "https")))

@@ -24,6 +24,15 @@ public static class ConnectionEndpoints
 
     public static void MapConnectionEndpoints(this WebApplication app)
     {
+        // Garmin calls this when a user removes Meander in Garmin Connect. Always 200 so Garmin does not retry.
+        app.MapPost("/api/webhooks/garmin/deregistration", (GarminDeregistrations notice, IConnectionStore store, ILogger<ConnectionService> logger) =>
+        {
+            var removed = (notice.Deregistrations ?? []).Where(d => !string.IsNullOrWhiteSpace(d.UserId))
+                .Sum(d => store.DeleteByExternalUser(ServiceKind.Garmin, d.UserId!));
+            logger.LogInformation("Garmin deregistration removed {Count} connection(s)", removed);
+            return Results.Ok();
+        });
+
         app.MapGet("/api/connections", (HttpContext context, ConnectionService connections, IConnectionStore store) =>
         {
             context.Response.Headers.CacheControl = "no-store";
