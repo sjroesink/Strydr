@@ -220,7 +220,7 @@ export const en = {
   'errors.tooManyRequests': 'Please wait before trying again.',
   'errors.savedSearchNotFound': 'This saved search is unavailable. Check the link or generate new routes.',
   'errors.routeNotFound': 'This route is unavailable. Open a saved route or generate a new one.',
-  'errors.exportExpired': 'This route export has expired. Generate your routes again to download a new GPX file.',
+  'errors.exportExpired': 'This route export has expired. Generate your routes again to download a new file.',
   'errors.searchQueryLength': 'Search must contain 3–200 characters.',
   'errors.serviceNotFound': 'This service is not available.',
   'errors.connectionStateInvalid': 'The connection could not be completed. Please try again.',

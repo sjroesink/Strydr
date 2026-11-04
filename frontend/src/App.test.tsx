@@ -608,12 +608,12 @@ it('links to Garmin when it is not connected yet', async () => {
   vi.mocked(generate).mockResolvedValue(savedSearch().candidates);
   render(<App />); await chooseStart(); await toPreferences(); await search();
   const link = (await screen.findAllByRole('link', { name: /Send to Garmin/ }))[0];
-  expect(link).toHaveAttribute('href', connectUrl('garmin', '/routes/search-1?route=route-1'));
+  expect(link).toHaveAttribute('href', connectUrl('garmin', '/routes/search-1?route=route-1&send=garmin'));
   expect(sendRoute).not.toHaveBeenCalled();
 });
 
 it('sends the route automatically after returning from Garmin', async () => {
-  window.history.replaceState(null, '', '/routes/search-1?route=route-2&connected=garmin');
+  window.history.replaceState(null, '', '/routes/search-1?route=route-2&send=garmin&connected=garmin');
   vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
   vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
   vi.mocked(sendRoute).mockResolvedValue({ externalId: '1', viewUrl: null });
@@ -621,6 +621,28 @@ it('sends the route automatically after returning from Garmin', async () => {
   await waitFor(() => expect(sendRoute).toHaveBeenCalledWith('route-2', 'garmin', expect.any(AbortSignal)));
   expect(sendRoute).toHaveBeenCalledTimes(1);
   expect(window.location.search).toBe('?route=route-2');
+});
+
+it('only connects, without sending, when returning from the connections panel', async () => {
+  window.history.replaceState(null, '', '/routes/search-1?route=route-2&connected=garmin');
+  vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  render(<App />);
+  expect(await screen.findByText('Garmin connected')).toBeInTheDocument();
+  expect(sendRoute).not.toHaveBeenCalled();
+  expect(window.location.search).toBe('?route=route-2');
+});
+
+it('shows the Preparing label on the export button that was clicked', async () => {
+  vi.mocked(generate).mockResolvedValue([candidate()]);
+  let finish: () => void = () => {};
+  vi.mocked(downloadFit).mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  await userEvent.click(await screen.findByRole('button', { name: /Download FIT/ }));
+  expect(await screen.findByRole('button', { name: /Preparing/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /Download GPX/ })).toBeDisabled();
+  finish();
+  expect(await screen.findByRole('button', { name: /Download FIT/ })).toBeEnabled();
 });
 
 it('reports a cancelled connection and an expired one', async () => {

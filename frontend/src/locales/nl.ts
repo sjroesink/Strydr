@@ -221,7 +221,7 @@ export const nl: Record<keyof typeof en, string> = {
   'errors.tooManyRequests': 'Wacht even voordat je het opnieuw probeert.',
   'errors.savedSearchNotFound': 'Deze opgeslagen zoekopdracht is niet beschikbaar. Controleer de link of zoek nieuwe routes.',
   'errors.routeNotFound': 'Deze route is niet beschikbaar. Open een opgeslagen route of zoek een nieuwe.',
-  'errors.exportExpired': 'Deze export is verlopen. Zoek je routes opnieuw om een nieuw GPX-bestand te downloaden.',
+  'errors.exportExpired': 'Deze export is verlopen. Zoek je routes opnieuw om een nieuw bestand te downloaden.',
   'errors.searchQueryLength': 'Een zoekopdracht moet 3 tot 200 tekens bevatten.',
   'errors.serviceNotFound': 'Deze dienst is niet beschikbaar.',
   'errors.connectionStateInvalid': 'De koppeling kon niet worden voltooid. Probeer het opnieuw.',

@@ -170,7 +170,7 @@ function Planner() {
   const [error, setError] = useState<Message[]>([]);
   const [notice, setNotice] = useState<Message | null>(null);
   const [locating, setLocating] = useState(false);
-  const [exporting, setExporting] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<{ id: string; format: 'gpx' | 'fit' } | null>(null);
   const { connections, setConnected, disconnect } = useConnections();
   const [sending, setSending] = useState<string | null>(null);
   // Read before the saved-search restore rewrites the URL.
@@ -572,7 +572,7 @@ function Planner() {
   async function exportRoute(candidate: RouteCandidate, format: 'gpx' | 'fit' = 'gpx') {
     exportingController.current?.abort();
     const controller = new AbortController(); exportingController.current = controller;
-    setExporting(candidate.id); setError([]);
+    setExporting({ id: candidate.id, format }); setError([]);
     try { await (format === 'fit' ? downloadFit : downloadGpx)(candidate, controller.signal); }
     catch (ex) {
       if (!controller.signal.aborted) setError(ex instanceof ApiError && ex.problem.status === 404
@@ -600,7 +600,9 @@ function Planner() {
     setConnectReturn(null);
     if (connectReturn.failed) { setError([{ key: 'errors.connectDenied' }]); return; }
     const route = candidates.find(item => item.id === selectedId);
+    if (!connectReturn.send) return;
     if (route) void sendToService(route, connectReturn.service);
+    else setError([{ key: 'errors.routeNotFound' }]);
   }, [connectReturn, phase, candidates, selectedId]);
 
   const km = Number(distance);
@@ -789,16 +791,16 @@ function Planner() {
                   onClick={() => void beginEditing(candidate)} aria-label={t('route.editLabel', { n: index + 1 })}>
                   <Icon name="edit" />{t('route.edit')}</button>
                 <button type="button" className="route-action route-action-download" disabled={exporting !== null} onClick={() => void exportRoute(candidate)}>
-                  <Icon name="download" />{exporting === candidate.id ? t('route.preparing') : t('route.download')}</button>
+                  <Icon name="download" />{exporting?.id === candidate.id && exporting.format === 'gpx' ? t('route.preparing') : t('route.download')}</button>
               </div>
               <div className="route-card-more">
                 <button type="button" className="text-link" disabled={exporting !== null} onClick={() => void exportRoute(candidate, 'fit')}>
-                  <Icon name="download" />{t('route.downloadFit')}</button>
+                  <Icon name="download" />{exporting?.id === candidate.id && exporting.format === 'fit' ? t('route.preparing') : t('route.downloadFit')}</button>
                 {candidate.searchId && connections.map(({ service, connected }) => {
                   const label = <><Icon name="send" />{sending === candidate.id ? t('route.sending') : t('route.sendTo', { service: SERVICE_NAMES[service] })}</>;
                   return connected
                     ? <button key={service} type="button" className="text-link" disabled={sending !== null} onClick={() => void sendToService(candidate, service)}>{label}</button>
-                    : <a key={service} className="text-link" href={connectUrl(service, savedSearchPath(candidate.searchId!, candidate.id))}>{label}</a>;
+                    : <a key={service} className="text-link" href={connectUrl(service, `${savedSearchPath(candidate.searchId!, candidate.id)}&send=${service}`)}>{label}</a>;
                 })}
               </div>
             </li>;

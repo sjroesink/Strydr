@@ -278,7 +278,7 @@ To add an activity, extend `Activity`, the provider's profile registry, the fron
 
 ## Integrations
 
-Meander can send a route to a visitor's own Garmin Connect account as a course. Connections are tied to an anonymous browser cookie (`meander_sid`); there are no accounts. Tokens are encrypted with ASP.NET Data Protection, using keys in `data/keys` next to the SQLite database.
+Meander can send a route to a visitor's own Garmin Connect account as a course. Connections are tied to an anonymous browser cookie (`meander_sid`); there are no accounts. `PublicBaseUrl` must be the address the browser uses (in development, the Vite URL), because the session cookies are tied to that host. Tokens are encrypted with ASP.NET Data Protection, using keys in `data/keys` next to the SQLite database.
 
 Every route can also be downloaded as a FIT course (`/api/routes/{id}/fit`), which works without any integration.
 
