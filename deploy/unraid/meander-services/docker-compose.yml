@@ -65,3 +65,7 @@ services:
 networks:
   meander:
     name: meander
+    # Docker's default address pools are exhausted on the server; pin a free subnet.
+    ipam:
+      config:
+        - subnet: 10.203.90.0/28
