@@ -18,7 +18,7 @@ public sealed class OrsResponseTests
         var item = new Dictionary<string, object?> { ["location"] = new[] { location.Longitude, location.Latitude } };
         if (metadata is not null) item["snapped_distance"] = JsonSerializer.Deserialize<JsonElement>(metadata);
         using var client = Client(JsonSerializer.Serialize(new { locations = new[] { item } }));
-        var points = await new OrsProvider(client, new()).SnapAsync([Fixtures.Start], Activity.Running, 1000, default);
+        var points = await new OrsProvider(client, new(), new()).SnapAsync([Fixtures.Start], Activity.Running, 1000, default);
         Assert.InRange(Assert.Single(points)!.DistanceM, 299.9, 300.1);
     }
 
@@ -29,7 +29,7 @@ public sealed class OrsResponseTests
     public async Task InvalidOptionalQualitiesKeepTheValidGeometry(string extras)
     {
         using var client = Client(Body(extras));
-        var route = await new OrsProvider(client, new()).RoundTripAsync(new(Fixtures.Start, 5, 3, 1, Activity.Running, new(true, true)), default);
+        var route = await new OrsProvider(client, new(), new()).RoundTripAsync(new(Fixtures.Start, 5, 3, 1, Activity.Running, new(true, true)), default);
         Assert.Equal(4, route.Geometry.Count);
         Assert.Equal(5, route.DistanceKm);
         Assert.Null(route.ElevationGainM);
@@ -42,7 +42,7 @@ public sealed class OrsResponseTests
     public async Task InvalidMandatoryGeometryStillFailsWithProviderStage()
     {
         using var client = Client(Body("{}").Replace("LineString", "Point"));
-        var error = await Assert.ThrowsAsync<ProviderException>(() => new OrsProvider(client, new())
+        var error = await Assert.ThrowsAsync<ProviderException>(() => new OrsProvider(client, new(), new())
             .RoundTripAsync(new(Fixtures.Start, 5, 3, 1, Activity.Running), default));
         Assert.Equal(ProviderFailure.InvalidResponse, error.Failure);
         Assert.Equal("directions", error.ResponseSection);

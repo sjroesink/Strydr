@@ -6,7 +6,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       AllowedHosts: "localhost;127.0.0.1;api"
-      Ors__ApiKey: ${ORS_API_KEY:?Set ORS_API_KEY in .env}
+      # Required for hosted ORS; compose.local.yaml switches to a self-hosted instance that needs none.
+      Ors__ApiKey: ${ORS_API_KEY:-}
       ASPNETCORE_URLS: http://0.0.0.0:8080
       ResultStorage__DatabasePath: /app/data/meander.sqlite
     ports:
@@ -25,7 +26,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.dev
     environment:
-      VITE_MAPTILER_KEY: ${MAPTILER_KEY:?Set MAPTILER_KEY in .env}
+      VITE_MAPTILER_KEY: ${MAPTILER_KEY:-}
       API_PROXY_TARGET: http://api:8080
       CHOKIDAR_USEPOLLING: "true"
     ports:

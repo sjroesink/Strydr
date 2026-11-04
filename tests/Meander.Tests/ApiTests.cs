@@ -27,6 +27,7 @@ internal sealed class ApiFactory(StubOrs handler, Dictionary<string, string?>? s
         builder.ConfigureServices(services =>
         {
             services.AddHttpClient<OrsProvider>().ConfigurePrimaryHttpMessageHandler(() => handler);
+            services.AddHttpClient<PhotonGeocodingProvider>().ConfigurePrimaryHttpMessageHandler(() => handler);
             services.AddSingleton<IWoodlandProvider>(woodlands ?? new FixedWoodland(null));
         });
     }
@@ -70,6 +71,15 @@ internal sealed class StubOrs : HttpMessageHandler
                 if (!OmitSnapDistance) item["snapped_distance"] = NullSnapDistance ? null : 0;
                 return item;
             }) });
+            if (path == "/api" && request.RequestUri.Port == 2322)
+                return FailureStatus is { } photonFailure ? Json(new { message = "stub photon failure" }, photonFailure) : Json(new { features = new object[] {
+                    new { properties = new { osm_type = "N", osm_id = 123, name = "Utrecht Centraal", street = "Stationsplein", city = "Utrecht", country = "Nederland" },
+                        geometry = new { coordinates = new[] { 5.11, 52.089 } } },
+                    new { properties = new { osm_type = "W", osm_id = 124, name = "Utrecht Centraal", street = "Stationsplein", city = "Utrecht", country = "Nederland" },
+                        geometry = new { coordinates = new[] { 5.111, 52.0891 } } },
+                    new { properties = new { osm_type = "W", osm_id = 456, street = "Oudegracht", housenumber = "1", city = "Utrecht" },
+                        geometry = new { coordinates = new[] { 5.12, 52.09 } } }
+                } });
             if (path.Contains("/geocode/")) return Json(new { features = new[] { new {
                 properties = new { gid = "place:utrecht", label = "Utrecht, Netherlands" }, geometry = new { coordinates = new[] { 5.12, 52.09 } }
             } } });
@@ -256,6 +266,105 @@ public sealed class ApiTests
         var response = await client.GetAsync("/api/geocode?q=Utrecht");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(key, Assert.Single(upstream.Requests).Authorization);
+    }
+
+    [Fact]
+    public async Task SelfHostedOrsRunsWithoutKeyOrAuthorizationHeader()
+    {
+        var upstream = new StubOrs();
+        await using var app = new ApiFactory(upstream, new() { ["Ors:ApiKey"] = "", ["Ors:BaseUrl"] = "http://ors:8082/ors/" });
+        using var client = app.CreateClient();
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/routes/generate", Request())).StatusCode);
+        Assert.NotEmpty(upstream.Requests);
+        Assert.All(upstream.Requests, request =>
+        {
+            Assert.Null(request.Authorization);
+            Assert.StartsWith("/ors/v2/", request.Path);
+        });
+    }
+
+    [Fact]
+    public void HostedOrsStillRequiresKey()
+    {
+        var hosted = new OrsOptions { ApiKey = "" };
+        Assert.Throws<InvalidOperationException>(() => ConfigurationChecks.Validate(hosted, new GenerationOptions()));
+        ConfigurationChecks.Validate(new OrsOptions { ApiKey = "", BaseUrl = "http://ors:8082/ors/" }, new GenerationOptions());
+        Assert.Throws<InvalidOperationException>(() => ConfigurationChecks.Validate(
+            new OrsOptions { ApiKey = "bad\nkey", BaseUrl = "http://ors:8082/ors/" }, new GenerationOptions()));
+    }
+
+    [Fact]
+    public async Task GreenDataIsNotRequestedWhenOrsDoesNotSupportIt()
+    {
+        var upstream = new StubOrs { IncludeQualities = true };
+        await using var app = new ApiFactory(upstream, new() { ["Ors:SupportsGreen"] = "false" });
+        using var client = app.CreateClient();
+        var response = await client.PostAsJsonAsync("/api/routes/generate", new {
+            start = new { latitude = 52.09, longitude = 5.12 }, targetDistanceKm = 5, preferGreen = true, preferUnpaved = true
+        });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.All(upstream.Requests.Where(r => r.Path.Contains("/directions/")), r =>
+        {
+            var body = r.Body!.Value;
+            Assert.False(body.TryGetProperty("options", out var options) && options.TryGetProperty("profile_params", out _));
+            Assert.Equal(new[] { "surface" }, body.GetProperty("extra_info").EnumerateArray().Select(v => v.GetString()));
+        });
+    }
+
+    [Fact]
+    public async Task PhotonGeocoderBuildsLabelsFromAddressParts()
+    {
+        var upstream = new StubOrs();
+        await using var app = new ApiFactory(upstream, new() { ["Geocoding:Provider"] = "Photon", ["Photon:BaseUrl"] = "http://photon:2322/", ["Photon:Language"] = "en" });
+        using var client = app.CreateClient();
+        var results = await client.GetFromJsonAsync<JsonElement>("/api/geocode?q=Utrecht%20%26%20park");
+        Assert.Equal(2, results.GetArrayLength());
+        Assert.Equal("N123", results[0].GetProperty("id").GetString());
+        Assert.Equal("Utrecht Centraal, Stationsplein, Utrecht, Nederland", results[0].GetProperty("label").GetString());
+        Assert.Equal(52.089, results[0].GetProperty("location").GetProperty("latitude").GetDouble());
+        Assert.Equal("Oudegracht 1, Utrecht", results[1].GetProperty("label").GetString());
+        var request = Assert.Single(upstream.Requests);
+        Assert.Null(request.Authorization);
+        Assert.Equal("/api", request.Path);
+    }
+
+    [Theory] [InlineData(500, 503)] [InlineData(400, 502)]
+    public async Task PhotonFailuresUseProblemDetails(int upstreamStatus, int expected)
+    {
+        await using var app = new ApiFactory(new() { FailureStatus = (HttpStatusCode)upstreamStatus },
+            new() { ["Geocoding:Provider"] = "Photon", ["Photon:BaseUrl"] = "http://photon:2322/" });
+        using var client = app.CreateClient();
+        var response = await client.GetAsync("/api/geocode?q=Utrecht");
+        Assert.Equal(expected, (int)response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType!.MediaType);
+    }
+
+    [Fact]
+    public async Task MapDataIsServedWithRangeSupportAndMissingFilesAre404()
+    {
+        var directory = Directory.CreateTempSubdirectory("meander-map-");
+        try
+        {
+            await File.WriteAllBytesAsync(Path.Combine(directory.FullName, "test.pmtiles"), Enumerable.Range(0, 64).Select(i => (byte)i).ToArray());
+            await using var app = new ApiFactory(new(), new() { ["MapData:Path"] = directory.FullName });
+            using var client = app.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/map/test.pmtiles");
+            request.Headers.Range = new(10, 19);
+            using var partial = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.PartialContent, partial.StatusCode);
+            Assert.Equal(Enumerable.Range(10, 10).Select(i => (byte)i), await partial.Content.ReadAsByteArrayAsync());
+            using var missing = await client.GetAsync("/map/missing.pmtiles");
+            Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+            Assert.Equal("application/problem+json", missing.Content.Headers.ContentType!.MediaType);
+        }
+        finally { directory.Delete(true); }
+    }
+
+    [Fact]
+    public async Task MissingMapDataDirectoryFailsAtStartup()
+    {
+        await using var app = new ApiFactory(new(), new() { ["MapData:Path"] = Path.Combine(Path.GetTempPath(), $"meander-missing-{Guid.NewGuid():N}") });
+        Assert.Throws<InvalidOperationException>(() => app.CreateClient());
     }
 
     [Fact]

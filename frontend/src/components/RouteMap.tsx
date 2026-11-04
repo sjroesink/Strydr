@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, StyleSpecification } from 'maplibre-gl';
+import { Protocol } from 'pmtiles';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import type { FeatureCollection } from 'geojson';
 import type { Location, RouteCandidate } from '../types';
 import type { ColorScheme } from '../useTheme';
 import { preserveRouteOverlays, themeOverlay } from '../mapTheme';
+import { resolveMapStyle, type MapEnv } from '../mapStyle';
 import { segmentMidpoints } from '../routeEditing';
 
 export const ROUTE_COLORS = ['#d3733c', '#466bc3', '#9363a9'];
@@ -34,8 +36,8 @@ const empty: FeatureCollection = { type: 'FeatureCollection', features: [] };
 // MapLibre 6 ships a separate ESM worker. Let Vite bundle its shared imports
 // rather than resolving it relative to an optimized or hashed main chunk.
 maplibregl.setWorkerUrl(workerUrl);
-const fallbackStyle: StyleSpecification = { version: 8, sources: {}, layers: [{ id: 'land', type: 'background', paint: { 'background-color': '#e9ede2' } }] };
-const darkFallbackStyle: StyleSpecification = { version: 8, sources: {}, layers: [{ id: 'land', type: 'background', paint: { 'background-color': '#1b1b1b' } }] };
+// Local basemaps are single PMTiles archives read with HTTP range requests.
+maplibregl.addProtocol('pmtiles', new Protocol().tile);
 
 // MapLibre keeps the grab offset for the whole gesture. Shifting it once the drag
 // starts moves the point above the finger, so you can see where it will land.
@@ -70,13 +72,8 @@ export default function RouteMap(props: Props) {
   const [ready, setReady] = useState(0);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
-  const styleUrl = import.meta.env.VITE_MAP_STYLE_URL as string | undefined;
-  const darkStyleUrl = import.meta.env.VITE_MAP_STYLE_DARK_URL as string | undefined;
-  const key = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
-  const configured = !!styleUrl || !!key && !key.startsWith('your-');
-  const selectedStyle = styleUrl ? props.colorScheme === 'dark' ? darkStyleUrl ?? styleUrl : styleUrl
-    : configured ? `https://api.maptiler.com/maps/${props.colorScheme === 'dark' ? 'base-v4-dark' : 'base-v4'}/style.json?key=${encodeURIComponent(key!)}`
-    : props.colorScheme === 'dark' ? darkFallbackStyle : fallbackStyle;
+  // Memoized so a generated PMTiles style keeps its identity and is only swapped on theme changes.
+  const { style: selectedStyle, configured } = useMemo(() => resolveMapStyle(import.meta.env as MapEnv, props.colorScheme), [props.colorScheme]);
   const appliedStyle = useRef<string | StyleSpecification | null>(null);
 
   useEffect(() => {
@@ -97,7 +94,7 @@ export default function RouteMap(props: Props) {
     mapRef.current = map;
     appliedStyle.current = selectedStyle;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-    map.on('error', () => setError('Map tiles could not load. Check your connection and MapTiler configuration.'));
+    map.on('error', () => setError('Map tiles could not load. Check your connection and map configuration.'));
     map.on('load', () => {
       map.addSource('radius', { type: 'geojson', data: empty });
       map.addLayer({ id: 'radius-fill', type: 'fill', source: 'radius', paint: { 'fill-color': '#215c45', 'fill-opacity': .06 } });
@@ -151,7 +148,7 @@ export default function RouteMap(props: Props) {
       latest.current.onMarkerDragChange(false);
       map.remove(); mapRef.current = null;
     };
-  }, [retry, configured, key, styleUrl, darkStyleUrl]);
+  }, [retry, configured]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -315,8 +312,8 @@ export default function RouteMap(props: Props) {
       ? props.start ? 'Tap the map to add a point' : 'Tap the map to set your start'
       : `Tap the map to set your ${props.mode === 'start' ? 'start' : 'finish'}`}</div>}
     {(!configured || error) && <div className="map-message" role="alert">
-      <strong>{error ? 'Map unavailable' : 'Add your map key'}</strong>
-      <p>{error || 'Set VITE_MAPTILER_KEY in frontend/.env.local and restart Vite to load the map.'}</p>
+      <strong>{error ? 'Map unavailable' : 'Configure a basemap'}</strong>
+      <p>{error || 'Set VITE_MAPTILER_KEY or VITE_PMTILES_URL in frontend/.env.local and restart Vite to load the map.'}</p>
       {error && <button type="button" className="text-button" onClick={() => setRetry(n => n + 1)}>Retry map</button>}
     </div>}
     {props.candidates.some(c => c.status === 'diagnostic') && <div className="map-diagnostic">Dashed routes exceed your radius</div>}

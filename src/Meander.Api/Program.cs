@@ -6,6 +6,8 @@ using Meander.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Http.Resilience;
 using Polly;
 using Polly.Timeout;
@@ -20,8 +22,12 @@ var generation = new GenerationOptions();
 var limits = new ApiRateOptions();
 var storage = new ResultStorageOptions();
 var woodland = new WoodlandOptions();
+var geocoding = new GeocodingOptions();
+var photon = new PhotonOptions();
+var mapData = new MapDataOptions();
 
 builder.Services.AddSingleton(ors);
+builder.Services.AddSingleton(photon);
 builder.Services.AddSingleton(generation);
 builder.Services.AddSingleton(storage);
 builder.Services.AddSingleton(woodland);
@@ -40,33 +46,28 @@ builder.Services.AddHttpClient("woodland", client =>
     client.MaxResponseContentBufferSize = 8 * 1024 * 1024;
 });
 builder.Services.AddSingleton<IWoodlandProvider, OverpassWoodlandProvider>();
-var orsClient = builder.Services.AddHttpClient<OrsProvider>(client =>
+AddProviderResilience("ors", builder.Services.AddHttpClient<OrsProvider>(client =>
 {
     client.BaseAddress = new Uri(ors.BaseUrl.TrimEnd('/') + "/");
     // ORS expects the raw API key, which may contain base64 padding. It is
     // not an HTTP authentication scheme; the typed Authorization parser rejects it.
-    client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", ors.ApiKey);
+    // Self-hosted ORS needs no key, so the header is omitted when none is configured.
+    if (!string.IsNullOrWhiteSpace(ors.ApiKey))
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", ors.ApiKey);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("Meander/1.0");
     client.Timeout = Timeout.InfiniteTimeSpan;
     client.MaxResponseContentBufferSize = 16 * 1024 * 1024;
-});
-orsClient.AddResilienceHandler("ors", pipeline =>
+}));
+AddProviderResilience("photon", builder.Services.AddHttpClient<PhotonGeocodingProvider>(client =>
 {
-    pipeline.AddTimeout(TimeSpan.FromSeconds(30));
-    pipeline.AddRetry(new HttpRetryStrategyOptions
-    {
-        MaxRetryAttempts = Math.Max(1, ors.RetryCount),
-        ShouldHandle = args => ValueTask.FromResult(ors.RetryCount > 0 &&
-            (args.Outcome.Exception is HttpRequestException or TimeoutRejectedException ||
-             args.Outcome.Result is { } response && ((int)response.StatusCode >= 500 || (int)response.StatusCode is 408 or 429))),
-        Delay = TimeSpan.FromSeconds(.5), BackoffType = DelayBackoffType.Exponential, UseJitter = true,
-        ShouldRetryAfterHeader = true
-    });
-    pipeline.AddTimeout(TimeSpan.FromSeconds(ors.AttemptTimeoutSeconds));
-});
-orsClient.AddHttpMessageHandler<ProviderBudgetHandler>();
+    client.BaseAddress = new Uri(photon.BaseUrl.TrimEnd('/') + "/");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Meander/1.0");
+    client.Timeout = Timeout.InfiniteTimeSpan;
+    client.MaxResponseContentBufferSize = 4 * 1024 * 1024;
+}));
 builder.Services.AddTransient<IRoutingProvider>(sp => sp.GetRequiredService<OrsProvider>());
-builder.Services.AddTransient<IGeocodingProvider>(sp => sp.GetRequiredService<OrsProvider>());
+builder.Services.AddTransient<IGeocodingProvider>(sp => geocoding.Provider == GeocodingProviderKind.Photon
+    ? sp.GetRequiredService<PhotonGeocodingProvider>() : sp.GetRequiredService<OrsProvider>());
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false)));
 builder.Services.Configure<RouteHandlerOptions>(o => o.ThrowOnBadRequest = true);
 builder.Services.AddProblemDetails(o => o.CustomizeProblemDetails = context =>
@@ -103,6 +104,19 @@ builder.Configuration.GetSection("Generation").Bind(generation);
 builder.Configuration.GetSection("RateLimiting").Bind(limits);
 builder.Configuration.GetSection("ResultStorage").Bind(storage);
 builder.Configuration.GetSection("Woodland").Bind(woodland);
+builder.Configuration.GetSection("Geocoding").Bind(geocoding);
+builder.Configuration.GetSection("Photon").Bind(photon);
+builder.Configuration.GetSection("MapData").Bind(mapData);
+if (geocoding.Provider == GeocodingProviderKind.Photon &&
+    (!Uri.TryCreate(photon.BaseUrl, UriKind.Absolute, out var photonUrl) || photonUrl.Scheme is not ("http" or "https")))
+    throw new InvalidOperationException("Photon:BaseUrl must be an absolute HTTP or HTTPS URL when Geocoding:Provider is Photon.");
+string? mapDataPath = null;
+if (!string.IsNullOrWhiteSpace(mapData.Path))
+{
+    mapDataPath = Path.GetFullPath(mapData.Path, app.Environment.ContentRootPath);
+    if (!Directory.Exists(mapDataPath))
+        throw new InvalidOperationException($"MapData:Path '{mapDataPath}' does not exist. Run scripts/fetch-map-data first, or leave MapData:Path empty.");
+}
 if (!Uri.TryCreate(woodland.Url, UriKind.Absolute, out var woodlandUrl) || woodlandUrl.Scheme is not ("http" or "https") ||
     !double.IsFinite(woodland.MaxSearchRadiusKm) || woodland.MaxSearchRadiusKm is < 1 or > 20 ||
     woodland.TimeoutSeconds is < 3 or > 20 || woodland.CacheHours is < 1 or > 168)
@@ -127,6 +141,19 @@ if (hasWebRoot)
     app.UseDefaultFiles();
     app.UseStaticFiles();
 }
+if (mapDataPath is not null)
+{
+    // Local basemap: a PMTiles archive plus glyphs and sprites. PMTiles reads it with HTTP range requests.
+    var mapTypes = new FileExtensionContentTypeProvider();
+    mapTypes.Mappings[".pmtiles"] = "application/octet-stream";
+    mapTypes.Mappings[".pbf"] = "application/x-protobuf";
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(mapDataPath), RequestPath = "/map", ContentTypeProvider = mapTypes
+    });
+}
+// Route after static files so the fallback endpoints below only see requests no file matched.
+app.UseRouting();
 app.UseRateLimiter();
 if (app.Environment.IsDevelopment()) app.MapOpenApi();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
@@ -181,10 +208,30 @@ app.MapGet("/api/routes/{id:guid}/gpx", (Guid id, ICandidateStore store, HttpCon
 });
 // API misses must remain ProblemDetails even when the production SPA is present.
 app.MapFallback("/api/{**path}", () => Results.Problem(statusCode: 404, title: "API endpoint not found"));
+app.MapFallback("/map/{**path}", () => Results.Problem(statusCode: 404, title: "Map file not found"));
 if (hasWebRoot) app.MapFallbackToFile("index.html");
 app.Run();
 
 static string ClientKey(HttpContext context) => context.Connection.RemoteIpAddress?.ToString() ?? "local";
+
+void AddProviderResilience(string name, IHttpClientBuilder client)
+{
+    client.AddResilienceHandler(name, pipeline =>
+    {
+        pipeline.AddTimeout(TimeSpan.FromSeconds(30));
+        pipeline.AddRetry(new HttpRetryStrategyOptions
+        {
+            MaxRetryAttempts = Math.Max(1, ors.RetryCount),
+            ShouldHandle = args => ValueTask.FromResult(ors.RetryCount > 0 &&
+                (args.Outcome.Exception is HttpRequestException or TimeoutRejectedException ||
+                 args.Outcome.Result is { } response && ((int)response.StatusCode >= 500 || (int)response.StatusCode is 408 or 429))),
+            Delay = TimeSpan.FromSeconds(.5), BackoffType = DelayBackoffType.Exponential, UseJitter = true,
+            ShouldRetryAfterHeader = true
+        });
+        pipeline.AddTimeout(TimeSpan.FromSeconds(ors.AttemptTimeoutSeconds));
+    });
+    client.AddHttpMessageHandler<ProviderBudgetHandler>();
+}
 public partial class Program;
 
 public sealed class ApiRateOptions
@@ -199,13 +246,14 @@ public static class ConfigurationChecks
 {
     public static void Validate(OrsOptions ors, GenerationOptions generation)
     {
-        if (string.IsNullOrWhiteSpace(ors.ApiKey) || ors.ApiKey.Contains("your-", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Set Ors__ApiKey in the environment or Ors:ApiKey in ignored appsettings.Local.json. Get a key from https://openrouteservice.org/.");
-        if (ors.ApiKey.Any(char.IsControl))
-            throw new InvalidOperationException("Ors:ApiKey must be a single line without control characters.");
         if (!Uri.TryCreate(ors.BaseUrl, UriKind.Absolute, out var uri) ||
             !(uri.Scheme == "https" || uri.Scheme == "http"))
             throw new InvalidOperationException("Ors:BaseUrl must be an absolute HTTP or HTTPS URL.");
+        // Only the hosted API needs a key; a self-hosted ORS (see compose.local.yaml) runs without one.
+        if (ors.IsHostedApi && (string.IsNullOrWhiteSpace(ors.ApiKey) || ors.ApiKey.Contains("your-", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Set Ors__ApiKey in the environment or Ors:ApiKey in ignored appsettings.Local.json. Get a key from https://openrouteservice.org/, or point Ors:BaseUrl at a self-hosted ORS.");
+        if (ors.ApiKey.Any(char.IsControl))
+            throw new InvalidOperationException("Ors:ApiKey must be a single line without control characters.");
         if (ors.Concurrency is < 1 or > 20 || ors.AttemptTimeoutSeconds is < 1 or > 25 || ors.RetryCount is < 0 or > 5 ||
             ors.DirectionsPerMinute < 1 || ors.GeocodingPerMinute < 1 || ors.SnapsPerMinute < 1)
             throw new InvalidOperationException("Invalid Ors limits. Use concurrency 1–20, timeout 1–25 seconds, retries 0–5, and positive request budgets.");

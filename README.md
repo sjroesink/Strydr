@@ -4,7 +4,7 @@ A local-first running and walking route planner. Choose a start, optionally an e
 
 ## Run locally
 
-Prerequisites: .NET 10 SDK, Node.js 26+, and ORS and MapTiler accounts. Docker Desktop with Linux containers is optional.
+Prerequisites: .NET 10 SDK, Node.js 26+, and ORS and MapTiler accounts. Docker Desktop with Linux containers is optional. To run without accounts or keys, see [Run without API keys](#run-without-api-keys).
 
 1. Get an [OpenRouteService API key](https://openrouteservice.org/) and a [MapTiler browser key](https://cloud.maptiler.com/). Enable `localhost` in the MapTiler key's allowed HTTP origins for local development.
 2. Copy `frontend/.env.example` to `frontend/.env.local` and replace `VITE_MAPTILER_KEY`. This key is browser-visible by design. Never put the ORS key in a `VITE_` variable.
@@ -32,7 +32,7 @@ Prerequisites: .NET 10 SDK, Node.js 26+, and ORS and MapTiler accounts. Docker D
 
 Open **http://127.0.0.1:5173**. Vite proxies `/api` to port 5080; no CORS configuration is needed. Health: `http://127.0.0.1:5080/api/health`. Development OpenAPI: `http://127.0.0.1:5080/openapi/v1.json`.
 
-Without a MapTiler key, an actionable message appears and place search still works. The API refuses to start without an ORS key. Live generation needs a working ORS account and remaining quota.
+Without a MapTiler key or local PMTiles basemap, an actionable message appears and place search still works. The API refuses to start without an ORS key when `Ors:BaseUrl` points to the hosted `api.openrouteservice.org`. Live generation needs a working ORS account and remaining quota.
 
 ## Docker Compose
 
@@ -44,7 +44,7 @@ docker compose up --build
 
 Open **http://127.0.0.1:5173**. The API is on **http://127.0.0.1:5080**. Both ports bind only to localhost. Frontend and backend source changes are watched; container-specific dependencies and build outputs use separate volumes. After dependency changes, run `docker compose up --build` and allow the development watchers to restore updated dependencies. Saved searches live in the named `route-data` volume; preserve it when refreshing other development volumes.
 
-Stop with `docker compose down`. Saved routes survive stops, restarts, and container rebuilds. `docker compose down --volumes` deletes them. The development setup uses hosted ORS and an embedded SQLite database; there is no separate database service or downloaded routing graph.
+Stop with `docker compose down`. Saved routes survive stops, restarts, and container rebuilds. `docker compose down --volumes` deletes them. The default development setup uses hosted ORS and an embedded SQLite database; there is no separate database service or downloaded routing graph. `compose.local.yaml` adds local routing, geocoding and map data instead (see below).
 
 Build the production-shaped single-container image separately:
 
@@ -55,14 +55,53 @@ docker run --rm -p 127.0.0.1:8080:8080 -v meander-routes:/app/data -e Ors__ApiKe
 
 The image serves the built frontend and API on one origin, runs as a non-root user, and contains no ORS key. Open `http://127.0.0.1:8080`. MapTiler configuration is applied at frontend build time. Azure provisioning and deployment are intentionally deferred.
 
+## Run without API keys
+
+Both keys are optional replacements for hosted services. Keyless mode uses three local services for the Netherlands:
+
+| Hosted | Local replacement | What changes |
+| --- | --- | --- |
+| ORS routing and snapping | Self-hosted [openrouteservice](https://giscience.github.io/openrouteservice/) container (`foot-walking` only) | `Ors:BaseUrl` points to the container; no key or `Authorization` header |
+| ORS geocoding (autocomplete) | [Photon](https://github.com/komoot/photon) container with the Netherlands index | `Geocoding:Provider=Photon`; self-hosted ORS has no geocoder |
+| MapTiler basemap | [Protomaps](https://protomaps.com/) PMTiles extract, glyphs and sprites served by the API at `/map` | `MapData:Path` on the API, `VITE_PMTILES_URL` in the frontend |
+
+Needs roughly 6 GB RAM for the containers (ORS uses up to 4 GB while building) and about 12 GB disk (1.3 GB OSM extract, ~2 GB PMTiles, ~4 GB Photon index plus graphs and elevation cache; the Photon download needs extra temporary space).
+
+1. Download the data into the ignored `data/` folder (Docker required for the `pmtiles` CLI):
+
+   ```powershell
+   ./scripts/fetch-map-data.ps1     # or: sh scripts/fetch-map-data.sh
+   ```
+
+2. Start everything with the local override (no keys needed in `.env`):
+
+   ```powershell
+   docker compose -f compose.yaml -f compose.local.yaml up --build
+   ```
+
+   If you used the Compose setup before this feature, add `--renew-anon-volumes` once: the existing `web` container keeps its old `node_modules` volume, which lacks the `pmtiles` packages.
+
+   On first start, ORS builds its routing graph (about 5–20 minutes, depending on the machine) and Photon downloads its Netherlands index. Generation returns 503 until ORS reports healthy (`docker compose ps`). Graphs, elevation data and the Photon index persist in named volumes. After downloading a newer OSM extract, remove the `ors-graphs` volume so the graph is rebuilt.
+
+Self-hosted ORS has no green index, so the override sets `Ors:SupportsGreen=false`. **Prefer green** still works through the Overpass woodland lookup; only ORS's green weighting for approaches and the legacy `greenScore` are unavailable. The override raises the ORS request budgets because a local instance has no quota.
+
+Running natively instead of with Compose: start the ORS and Photon containers yourself, then set `Ors__BaseUrl`, `Ors__SupportsGreen=false`, `Geocoding__Provider=Photon`, `Photon__BaseUrl` and `MapData__Path` (e.g. the absolute path of `data/map`) for the API, and `VITE_PMTILES_URL=/map/netherlands.pmtiles` in `frontend/.env.local`. Vite proxies `/map` to the API. For the production image, build with `--build-arg VITE_PMTILES_URL=/map/netherlands.pmtiles` and mount `data/map` at the `MapData__Path` location.
+
+The options are independent: for example, keep hosted ORS with a key and replace only MapTiler with the local basemap.
+
 ## Configuration
 
 Backend defaults live in `src/Meander.Api/appsettings.json`; ignored `appsettings.Local.json` overrides them, and environment variables override both. Use double underscores for environment nesting, e.g. `Generation__DeadlineSeconds=60`.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `Ors:ApiKey` | required | Server-side ORS credential |
+| `Ors:ApiKey` | required for hosted ORS | Server-side ORS credential; omitted for a self-hosted `Ors:BaseUrl` |
 | `Ors:BaseUrl` | `https://api.openrouteservice.org/` | Include the `/ors/` prefix when required by a self-hosted instance |
+| `Ors:SupportsGreen` | true | Set false for ORS instances without a green index; green extras and weighting are then not requested |
+| `Geocoding:Provider` | `Ors` | `Ors` (hosted geocoding) or `Photon` |
+| `Photon:BaseUrl` | `http://localhost:2322/` | Photon instance used when `Geocoding:Provider` is `Photon` |
+| `Photon:Language` | empty | Optional Photon `lang` parameter; empty uses local names |
+| `MapData:Path` | empty | Directory served at `/map` (PMTiles, glyphs, sprites); must exist when set |
 | `Ors:Concurrency` | 3 | Process-wide concurrent HTTP attempts |
 | `Ors:AttemptTimeoutSeconds` | 10 | Timeout for each HTTP attempt |
 | `Ors:RetryCount` | 2 | Retries after transient failures; 0 disables retries |
@@ -93,6 +132,8 @@ Frontend configuration (`frontend/.env.local`, restart Vite after edits):
 | Variable | Purpose |
 | --- | --- |
 | `VITE_MAPTILER_KEY` | Public browser key; restrict allowed origins |
+| `VITE_PMTILES_URL` | Keyless local basemap, e.g. `/map/netherlands.pmtiles`; takes precedence over MapTiler |
+| `VITE_MAP_ASSETS_URL` | Glyphs and sprites for the local basemap; defaults to `/map/assets` |
 | `VITE_MAP_STYLE_URL` | Optional OSM-based MapLibre style URL instead of MapTiler's quiet Base v4 style |
 | `VITE_MAP_STYLE_DARK_URL` | Optional dark counterpart for a custom map style; default MapTiler maps switch to Base v4 Dark automatically |
 | `VITE_MAX_DISTANCE_KM` | Slider maximum; default 60, keep aligned with the backend maximum |
@@ -202,7 +243,7 @@ The transient candidate/drawn-section cache is bounded to approximately 64 MiB p
 - `frontend`: React hooks/components, Vite proxy, MapLibre rendering with a separately bundled ESM worker, Vitest, and Playwright fixtures.
 - `tests/Meander.Tests`: xUnit domain, geometry, cache, export, budgets, and real-adapter API integration tests.
 
-To add a provider, implement `IRoutingProvider` and register it in the API. It must support snapping, round trips (natively or via its own waypoint synthesis), via-point routing, and shortest routing. Geocoding has its own `IGeocodingProvider` because a self-hosted router need not include a geocoder. A self-hosted ORS can reuse the current adapter with a changed base URL. GraphHopper needs a new adapter, not a rewrite of generation or frontend code.
+To add a provider, implement `IRoutingProvider` and register it in the API. It must support snapping, round trips (natively or via its own waypoint synthesis), via-point routing, and shortest routing. Geocoding has its own `IGeocodingProvider` because a self-hosted router need not include a geocoder; `PhotonGeocodingProvider` is the self-hosted option. A self-hosted ORS reuses the current adapter with a changed base URL. GraphHopper needs a new adapter, not a rewrite of generation or frontend code.
 
 To add an activity, extend `Activity`, the provider's profile registry, the frontend activity type/selector, and associated tests. No profile strings belong in the generator or API request contract.
 
@@ -223,4 +264,4 @@ The E2E starts a local upstream fixture (5091), the real API (5081), and Vite (5
 
 Live smoke check after adding real keys: search for a start near a connected walking network, generate a 5 km loop, enable a 2 km radius and regenerate, then choose a different end and request a longer route. Confirm candidate geometry, warnings, and exported coordinates. Try an end outside the radius and a target below the measured shortest route to confirm validation. This live check uses your ORS quota.
 
-Map and routing attribution remains visible. Map data: [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Routing/geocoding: [openrouteservice](https://openrouteservice.org/). Vector tiles: [MapTiler](https://www.maptiler.com/).
+Map and routing attribution remains visible. Map data: [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Routing/geocoding: [openrouteservice](https://openrouteservice.org/). Vector tiles: [MapTiler](https://www.maptiler.com/), or [Protomaps](https://protomaps.com/) in keyless mode. Keyless geocoding: [Photon](https://photon.komoot.io/).
