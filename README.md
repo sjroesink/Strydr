@@ -95,9 +95,9 @@ The options are independent: for example, keep hosted ORS with a key and replace
 Production runs keyless at **https://meander.roesink.dev** (also `meander.sander.ninja`), via Cloudflare and Traefik (`D:\Projects\infra`, `publicServices.meander`, host port 3118). Two Compose Manager stacks, kept in `deploy/unraid/`:
 
 - `meander-services`: ORS, Photon and Overpass. Started manually; they take minutes to an hour to load and rarely change. It creates the shared `meander` network.
-- `meander`: the app image `ghcr.io/sjroesink/meander:latest`. `.github/workflows/deploy.yml` builds it on every push to `main` (with `VITE_PMTILES_URL=/map/netherlands.pmtiles`) and calls the deploy webhook, which pulls and restarts only this stack.
+- `meander`: the app, built on the server from the checkout in `/mnt/user/appdata/meander/repo` (with `VITE_PMTILES_URL=/map/netherlands.pmtiles`). On every push to `main`, `.github/workflows/deploy.yml` runs the tests and calls `https://deploy.roes.ink/hooks/deploy` with a GitHub OIDC token and a short-lived repository token. The webhook verifies the token, fast-forwards the checkout, rebuilds only this stack and waits for `/api/health`.
 
-Data lives in `/mnt/user/appdata/meander/`: `map/` (PMTiles and assets from `scripts/fetch-map-data`), `ors/files/` (OSM extract), `ors/graphs`, `ors/elevation_cache`, `photon/`, `overpass/` and `data/` (SQLite, owned by uid 1654 for the non-root app user). The app sets `ReverseProxy__ClientIpHeader=CF-Connecting-IP`, so per-IP rate limits apply to visitors rather than to the proxy; leave it unset when the app is reachable without Cloudflare.
+Data lives in `/mnt/user/appdata/meander/`: `repo/` (checkout), `map/` (PMTiles and assets from `scripts/fetch-map-data`), `ors/files/` (OSM extract), `ors/graphs`, `ors/elevation_cache`, `photon/`, `overpass/` and `data/` (SQLite, owned by uid 1654 for the non-root app user). The app sets `ReverseProxy__ClientIpHeader=CF-Connecting-IP`, so per-IP rate limits apply to visitors rather than to the proxy; leave it unset when the app is reachable without Cloudflare.
 
 ## Configuration
 

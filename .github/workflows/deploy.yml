@@ -1,45 +1,94 @@
-name: Build & Deploy
+name: Deploy Meander
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
+  id-token: write
+
+concurrency:
+  group: deploy-meander-production
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  test-and-deploy:
+    name: Test and deploy meander.roesink.dev
+    if: github.repository == 'sjroesink/Strydr'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check out the triggering revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Build & push
-        uses: docker/build-push-action@v6
+      - name: Set up .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
-          context: .
-          push: true
-          # Keyless basemap: the PMTiles file and its assets are mounted at /app/map on the server.
-          build-args: |
-            VITE_PMTILES_URL=/map/netherlands.pmtiles
-          tags: |
-            ghcr.io/sjroesink/meander:latest
-            ghcr.io/sjroesink/meander:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          global-json-file: global.json
 
-      - name: Trigger Unraid deploy
-        env:
-          WEBHOOK_SECRET: ${{ secrets.UNRAID_DEPLOY_WEBHOOK_SECRET }}
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Test
         run: |
-          curl -fsS -X POST https://deploy.roes.ink/hooks/deploy \
-            -H 'Content-Type: application/json' \
-            -H "X-Webhook-Secret: ${WEBHOOK_SECRET}" \
-            -d '{"stack":"meander"}'
+          set -euo pipefail
+          dotnet test Meander.slnx
+          cd frontend
+          npm ci
+          npm test
+          npm run build
+
+      # The Unraid webhook verifies this OIDC token, fast-forwards the server checkout to
+      # this commit (with the short-lived repository token, as the repo is private),
+      # rebuilds the "meander" stack and waits for /api/health.
+      - name: Trigger authenticated Unraid deployment
+        env:
+          REPOSITORY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 120); do
+            token="$(curl --fail --silent --show-error \
+              --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=deploy.roes.ink" | jq -r .value)"
+            test -n "$token"
+            response_file="$(mktemp)"
+            http_code="$(curl --silent --show-error \
+              --request POST \
+              --header "Authorization: Bearer ${token}" \
+              --header "X-GitHub-Token: ${REPOSITORY_TOKEN}" \
+              --header 'Content-Type: application/json' \
+              --data '{"stack":"meander"}' \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
+              https://deploy.roes.ink/hooks/deploy || true)"
+            response="$(<"$response_file")"
+            rm -f "$response_file"
+
+            if [ "$http_code" = 200 ]; then
+              printf '%s\n' "$response"
+              if printf '%s\n' "$response" | grep -Fq "Commit: ${GITHUB_SHA}" && \
+                 printf '%s\n' "$response" | grep -Fq 'Deploy voltooid: meander'; then
+                exit 0
+              fi
+              if printf '%s\n' "$response" | grep -Fq \
+                 "Deploy overgeslagen: meander ${GITHUB_SHA} vervangen door"; then
+                echo 'Deze run is vervangen door een nieuwere push.'
+                exit 0
+              fi
+              echo 'Onverwacht antwoord van de deploywebhook.' >&2
+              exit 1
+            fi
+
+            echo "Deploywebhook nog bezet of time-out (HTTP ${http_code}, poging ${attempt}/120); opnieuw proberen..."
+            sleep 10
+          done
+          echo 'Deploywebhook bleef twintig minuten onbereikbaar.' >&2
+          exit 1

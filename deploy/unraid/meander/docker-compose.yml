@@ -1,12 +1,17 @@
-# Unraid Compose Manager stack "meander": the app, redeployed by the deploy webhook on every
-# push to main (docker compose pull && down && up). Needs the "meander-services" stack, which
-# creates the shared "meander" network.
+# Unraid Compose Manager stack "meander": the app, built from the server checkout in
+# /mnt/user/appdata/meander/repo. The deploy webhook fast-forwards that checkout to the
+# verified commit and runs `docker compose build --pull && up -d` on every push to main.
+# Needs the "meander-services" stack, which creates the shared "meander" network.
 services:
   meander:
-    image: ghcr.io/sjroesink/meander:latest
+    build:
+      context: /mnt/user/appdata/meander/repo
+      args:
+        # Keyless basemap: the PMTiles file and its assets are mounted at /app/map.
+        VITE_PMTILES_URL: /map/netherlands.pmtiles
+    image: meander:local
     container_name: meander
     restart: unless-stopped
-    pull_policy: always
     ports:
       - "3118:8080"
     environment:
