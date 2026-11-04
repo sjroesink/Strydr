@@ -134,8 +134,12 @@ Backend defaults live in `src/Meander.Api/appsettings.json`; ignored `appsetting
 | `RateLimiting:ConcurrentGenerations` | 2 | Process-wide generation limit; rejected requests are not queued |
 | `RateLimiting:GeocodePerMinute` | 60 | Per-IP incoming autocomplete limit |
 | `RateLimiting:PreviewPerMinute` | 30 | Per-IP incoming drawn-section previews |
+| `RateLimiting:ConnectPerMinute` | 20 | Per-IP limit on connecting, disconnecting and sending routes to a service |
 | `ReverseProxy:ClientIpHeader` | empty | Header holding the visitor IP behind a trusted proxy (e.g. `CF-Connecting-IP`); used for per-IP rate limits |
 | `AllowedHosts` | `localhost;127.0.0.1` | Accepted hostnames; Compose also allows its internal `api` hostname |
+| `PublicBaseUrl` | empty | Public address of the app (e.g. `https://meander.roesink.dev`); required when an integration is configured, used for OAuth redirect URIs |
+| `DataProtection:KeysPath` | `data/keys` | Directory for the keys that encrypt stored service tokens; keep it on persistent storage |
+| `Integrations:Garmin:ClientId` / `ClientSecret` | empty | Garmin Connect credentials; an empty client id turns the integration off. See [Integrations](#integrations) |
 
 Provider HTTP calls have a 30-second total timeout across retries. Generation has its own overall deadline. `Retry-After` is honored within those deadlines. A local outbound-budget rejection does not itself consume retries. The configured provider URL supports HTTPS and HTTP, including internal HTTP addresses for a future self-hosted routing container.
 
@@ -240,6 +244,13 @@ Qualifying routes rank first. If fewer than three remain, distance misses and th
 - `GET /api/geocode?q=Utrecht` returns up to five `{ id, label, location }` suggestions. Queries must be 3–200 characters.
 - `GET /api/searches/{searchId}` returns the saved request, candidates, requested drawing points and drawn preview, or ProblemDetails 404. It does not call ORS.
 - `GET /api/routes/{id}/gpx` returns GPX 1.1 with optional elevation, warnings, attribution, and attachment headers. Export does not call ORS.
+- `GET /api/routes/{id}/fit` returns the route as a FIT course with attachment headers. Export does not call ORS.
+- `GET /api/connections` lists the services available to this browser and whether each is connected.
+- `GET /api/connections/{service}/authorize?returnUrl=` starts the OAuth flow and redirects to the service; `returnUrl` must be a local path.
+- `GET /api/connections/{service}/callback` completes the OAuth flow, stores the encrypted tokens and redirects back to `returnUrl`.
+- `DELETE /api/connections/{service}` revokes and removes the connection.
+- `POST /api/routes/{id}/send/{service}` sends a saved route to the connected service (for example as a Garmin course).
+- `POST /api/webhooks/garmin/deregistration` is called by Garmin when a user removes Meander in Garmin Connect; it always answers 200 and removes the matching connection.
 - Errors use `application/problem+json`: 400 malformed input, 422 invalid constraints/no routable path, 429 application limiting, 502 malformed upstream data, 503 upstream unavailable/throttled, 504 timeout. A target shorter than the measured shortest A→B route includes `minimumDistanceKm`. Error responses include a trace ID.
 - No usable route results in 422 or an upstream failure status, never an empty 200. Independent call failures retain usable candidates with `partialSearch` warnings.
 
@@ -264,6 +275,29 @@ The transient candidate/drawn-section cache is bounded to approximately 64 MiB p
 To add a provider, implement `IRoutingProvider` and register it in the API. It must support snapping, round trips (natively or via its own waypoint synthesis), via-point routing, and shortest routing. Geocoding has its own `IGeocodingProvider` because a self-hosted router need not include a geocoder; `PhotonGeocodingProvider` is the self-hosted option. A self-hosted ORS reuses the current adapter with a changed base URL. GraphHopper needs a new adapter, not a rewrite of generation or frontend code.
 
 To add an activity, extend `Activity`, the provider's profile registry, the frontend activity type/selector, and associated tests. No profile strings belong in the generator or API request contract.
+
+## Integrations
+
+Meander can send a route to a visitor's own Garmin Connect account as a course. Connections are tied to an anonymous browser cookie (`meander_sid`); there are no accounts. `PublicBaseUrl` must be the address the browser uses (in development, the Vite URL), because the session cookies are tied to that host. Tokens are encrypted with ASP.NET Data Protection, using keys in `data/keys` next to the SQLite database.
+
+Every route can also be downloaded as a FIT course (`/api/routes/{id}/fit`), which works without any integration.
+
+### Garmin
+
+1. Apply for the [Garmin Connect Developer Program](https://developer.garmin.com/gc-developer-program/overview) with the Courses API. Privacy policy: https://www.roesink.dev/privacy/meander/
+2. Register these URLs in the Garmin developer portal:
+   - Redirect URI: `https://meander.roesink.dev/api/connections/garmin/callback`
+   - Deregistration notification: `https://meander.roesink.dev/api/webhooks/garmin/deregistration`
+3. Set `Integrations__Garmin__ClientId`, `Integrations__Garmin__ClientSecret` and `PublicBaseUrl`. On Unraid, set them as `GARMIN_CLIENT_ID` and `GARMIN_CLIENT_SECRET` in the `meander` stack's `.env`.
+
+Garmin's URLs are configurable under `Integrations:Garmin` (`AuthorizeUrl`, `TokenUrl`, `UserIdUrl`, `RegistrationUrl`, `CourseUrl`). The course payload is built in one place, `GarminCourseMapper`.
+
+### Adding a service
+
+- A connection and what a service can do are separate. Implement `IServiceConnector` (OAuth: authorize URL, code exchange, refresh, revoke) for the service.
+- Implement one capability per feature, for example `IRouteDestination` to push routes.
+- Add the service to `ServiceKind` and register both in `Program.cs`.
+- A future data source (such as Strava activities) gets its own capability interface and takes its tokens from `ConnectionService.UseAsync`. The connection layer does not change.
 
 ## Checks
 

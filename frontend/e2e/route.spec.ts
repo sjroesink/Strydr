@@ -227,6 +227,26 @@ test('choose a start, generate and inspect routes, and export GPX', async ({ pag
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test('connect Garmin and send the chosen route', async ({ page, request }) => {
+  // The fake server's counter spans both projects, so compare against a baseline.
+  const courseCount = async () => (await (await request.get('http://127.0.0.1:5091/garmin/courses')).json()).count as number;
+  const before = await courseCount();
+  await page.route('https://fonts.googleapis.com/**', route => route.abort());
+  await page.goto('/');
+  await chooseUtrecht(page);
+  await page.getByRole('button', { name: /Next: distance/ }).click();
+  await page.getByRole('button', { name: /Next: preferences/ }).click();
+  await page.getByRole('button', { name: 'Find my routes' }).click();
+  await expect(page.getByRole('button', { name: /Route [123]/ })).toHaveCount(3);
+  await page.locator('.route-card.selected').getByRole('link', { name: /Send to Garmin/ }).click();
+  await expect(page.getByRole('status')).toContainText('Route sent to Garmin');
+  await expect(page.getByText('Garmin connected')).toBeVisible();
+  expect(page.url()).not.toContain('connected=');
+  expect(await courseCount()).toBe(before + 1);
+  await page.getByRole('button', { name: 'Disconnect' }).click();
+  await expect(page.getByRole('link', { name: 'Connect Garmin' })).toBeVisible();
+});
+
 test.describe('Dutch browser', () => {
   test.use({ locale: 'nl-NL' });
   test('shows the planner in Dutch and switches to English', async ({ page }) => {

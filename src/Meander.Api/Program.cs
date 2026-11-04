@@ -3,6 +3,9 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using Meander.Core;
 using Meander.Infrastructure;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
@@ -26,6 +29,10 @@ var woodland = new WoodlandOptions();
 var geocoding = new GeocodingOptions();
 var photon = new PhotonOptions();
 var mapData = new MapDataOptions();
+var connectionOptions = new ConnectionOptions();
+builder.Services.AddSingleton(connectionOptions);
+var garmin = new GarminOptions();
+builder.Services.AddSingleton(garmin);
 
 builder.Services.AddSingleton(ors);
 builder.Services.AddSingleton(photon);
@@ -38,6 +45,20 @@ builder.Services.AddSingleton<ProviderBudget>();
 builder.Services.AddTransient<ProviderBudgetHandler>();
 builder.Services.AddSingleton<ICandidateStore, CandidateStore>();
 builder.Services.AddSingleton<IRouteSearchStore, SqliteRouteSearchStore>();
+builder.Services.AddSingleton<IConnectionStore, SqliteConnectionStore>();
+builder.Services.AddTransient<ConnectionService>();
+// Garmin calls are never retried: authorization codes are single-use and courses must not duplicate.
+builder.Services.AddHttpClient<GarminConnector>(client => { client.Timeout = TimeSpan.FromSeconds(20); client.DefaultRequestHeaders.UserAgent.ParseAdd("Meander/1.0"); });
+builder.Services.AddHttpClient<GarminCourseDestination>(client => { client.Timeout = TimeSpan.FromSeconds(20); client.DefaultRequestHeaders.UserAgent.ParseAdd("Meander/1.0"); });
+builder.Services.AddTransient<IServiceConnector>(sp => sp.GetRequiredService<GarminConnector>());
+builder.Services.AddTransient<IRouteDestination>(sp => sp.GetRequiredService<GarminCourseDestination>());
+builder.Services.AddDataProtection().SetApplicationName("Meander");
+// Resolved lazily so test hosts can point the key ring elsewhere.
+builder.Services.AddOptions<KeyManagementOptions>().Configure<IConfiguration, IHostEnvironment>((o, config, env) =>
+{
+    if (config["DataProtection:KeysPath"] is { Length: > 0 } keys)
+        o.XmlRepository = new FileSystemXmlRepository(new DirectoryInfo(Path.GetFullPath(keys, env.ContentRootPath)), Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
+});
 builder.Services.AddTransient<RouteGenerator>();
 builder.Services.AddTransient<RouteEditor>();
 builder.Services.AddHttpClient("woodland", client =>
@@ -97,6 +118,8 @@ builder.Services.AddRateLimiter(o =>
         _ => new FixedWindowRateLimiterOptions { PermitLimit = limits.GeocodePerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     o.AddPolicy("preview", context => RateLimitPartition.GetFixedWindowLimiter(ClientKey(context),
         _ => new FixedWindowRateLimiterOptions { PermitLimit = limits.PreviewPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+    o.AddPolicy("connect", context => RateLimitPartition.GetFixedWindowLimiter(ClientKey(context),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = limits.ConnectPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
 });
 
 var app = builder.Build();
@@ -108,6 +131,9 @@ builder.Configuration.GetSection("Woodland").Bind(woodland);
 builder.Configuration.GetSection("Geocoding").Bind(geocoding);
 builder.Configuration.GetSection("Photon").Bind(photon);
 builder.Configuration.GetSection("MapData").Bind(mapData);
+builder.Configuration.GetSection("Integrations:Garmin").Bind(garmin);
+garmin.Validate();
+connectionOptions.PublicBaseUrl = builder.Configuration["PublicBaseUrl"] ?? "";
 if (geocoding.Provider == GeocodingProviderKind.Photon &&
     (!Uri.TryCreate(photon.BaseUrl, UriKind.Absolute, out var photonUrl) || photonUrl.Scheme is not ("http" or "https")))
     throw new InvalidOperationException("Photon:BaseUrl must be an absolute HTTP or HTTPS URL when Geocoding:Provider is Photon.");
@@ -127,7 +153,11 @@ if (storage.DatabasePath != ":memory:")
 ConfigurationChecks.Validate(ors, generation);
 // Fail at startup if the database location is not writable, before spending routing quota.
 app.Services.GetRequiredService<IRouteSearchStore>();
-if (limits.GeneratePerMinute < 1 || limits.GeocodePerMinute < 1 || limits.PreviewPerMinute < 1 || limits.ConcurrentGenerations < 1)
+app.Services.GetRequiredService<IConnectionStore>();
+if (app.Services.GetRequiredService<ConnectionService>().Configured.Count > 0 &&
+    (!Uri.TryCreate(connectionOptions.PublicBaseUrl, UriKind.Absolute, out var publicBase) || publicBase.Scheme is not ("http" or "https")))
+    throw new InvalidOperationException("Set PublicBaseUrl (for example https://meander.roesink.dev) when a service integration is configured.");
+if (limits.GeneratePerMinute < 1 || limits.GeocodePerMinute < 1 || limits.PreviewPerMinute < 1 || limits.ConnectPerMinute < 1 || limits.ConcurrentGenerations < 1)
     throw new InvalidOperationException("RateLimiting values must be positive integers.");
 // Behind Cloudflare and Traefik every request arrives from the proxy, which would make the
 // per-IP rate limits global. Trust the configured client IP header (e.g. CF-Connecting-IP).
@@ -225,6 +255,16 @@ app.MapGet("/api/routes/{id:guid}/gpx", (Guid id, ICandidateStore store, HttpCon
         : Results.Problem(statusCode: 404, title: "Route export expired or unavailable", detail: "Generate your route again to create a new GPX download.",
             extensions: new Dictionary<string, object?> { ["code"] = "exportExpired" });
 });
+app.MapGet("/api/routes/{id:guid}/fit", (Guid id, IRouteSearchStore searches, ICandidateStore cache, TimeProvider clock, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return RouteLookup.Find(id, searches, cache) is { } found
+        ? Results.File(FitCourseWriter.Write(found.Route, found.Activity, clock.GetUtcNow()), "application/vnd.ant.fit",
+            $"meander-{found.Route.DistanceKm.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}km-{id:N}.fit")
+        : Results.Problem(statusCode: 404, title: "Route export expired or unavailable", detail: "Generate your route again to create a new download.",
+            extensions: new Dictionary<string, object?> { ["code"] = "exportExpired" });
+});
+app.MapConnectionEndpoints();
 // API misses must remain ProblemDetails even when the production SPA is present.
 app.MapFallback("/api/{**path}", () => Results.Problem(statusCode: 404, title: "API endpoint not found", extensions: new Dictionary<string, object?> { ["code"] = "apiNotFound" }));
 app.MapFallback("/map/{**path}", () => Results.Problem(statusCode: 404, title: "Map file not found", extensions: new Dictionary<string, object?> { ["code"] = "mapFileNotFound" }));
@@ -259,6 +299,7 @@ public sealed class ApiRateOptions
     public int ConcurrentGenerations { get; set; } = 2;
     public int GeocodePerMinute { get; set; } = 60;
     public int PreviewPerMinute { get; set; } = 30;
+    public int ConnectPerMinute { get; set; } = 20;
 }
 
 public static class ConfigurationChecks

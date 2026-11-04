@@ -13,7 +13,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Meander.Tests;
 
-internal sealed class ApiFactory(StubOrs handler, Dictionary<string, string?>? settings = null, IWoodlandProvider? woodlands = null) : WebApplicationFactory<Program>
+internal sealed class ApiFactory(StubOrs handler, Dictionary<string, string?>? settings = null, IWoodlandProvider? woodlands = null,
+    Action<IServiceCollection>? configure = null) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -22,13 +23,16 @@ internal sealed class ApiFactory(StubOrs handler, Dictionary<string, string?>? s
         {
             ["Ors:ApiKey"] = "test-key", ["Ors:RetryCount"] = "0", ["Ors:DirectionsPerMinute"] = "1000",
             ["RateLimiting:GeneratePerMinute"] = "100", ["RateLimiting:GeocodePerMinute"] = "100",
-            ["ResultStorage:DatabasePath"] = ":memory:"
+            ["ResultStorage:DatabasePath"] = ":memory:",
+            ["PublicBaseUrl"] = "http://localhost",
+            ["DataProtection:KeysPath"] = Path.Combine(Path.GetTempPath(), "meander-test-keys")
         }.Concat(settings ?? []).GroupBy(k => k.Key).ToDictionary(g => g.Key, g => g.Last().Value)));
         builder.ConfigureServices(services =>
         {
             services.AddHttpClient<OrsProvider>().ConfigurePrimaryHttpMessageHandler(() => handler);
             services.AddHttpClient<PhotonGeocodingProvider>().ConfigurePrimaryHttpMessageHandler(() => handler);
             services.AddSingleton<IWoodlandProvider>(woodlands ?? new FixedWoodland(null));
+            configure?.Invoke(services);
         });
     }
 }

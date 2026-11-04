@@ -27,6 +27,7 @@ const darkStyle = { ...style, layers: style.layers.map(layer => ({ ...layer, pai
     : { 'line-color': layer.id === 'roads' ? '#514e46' : '#30302d' }),
 } })) };
 let calls = 0;
+let garminCourses = 0;
 const server = createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
@@ -43,6 +44,18 @@ const server = createServer(async (req, res) => {
   if (path === '/geocode/autocomplete') {
     res.end(JSON.stringify({ features: [{ properties: { gid: 'fixture:utrecht', label: 'Utrecht, Netherlands' }, geometry: { coordinates: center } }] })); return;
   }
+  if (path === '/garmin/authorize') {
+    const params = new URL(req.url, 'http://127.0.0.1:5091').searchParams;
+    const back = new URL(params.get('redirect_uri'));
+    back.searchParams.set('code', 'e2e-code');
+    back.searchParams.set('state', params.get('state'));
+    res.statusCode = 302; res.setHeader('Location', back.toString()); res.end(); return;
+  }
+  if (path === '/garmin/token') { res.end(JSON.stringify({ access_token: 'e2e-access', refresh_token: 'e2e-refresh', expires_in: 86400 })); return; }
+  if (path === '/garmin/user/id') { res.end(JSON.stringify({ userId: 'e2e-user' })); return; }
+  if (path === '/garmin/user/registration') { res.statusCode = 204; res.end(); return; }
+  if (path === '/garmin/course') { garminCourses++; res.end(JSON.stringify({ courseId: 4242 })); return; }
+  if (path === '/garmin/courses') { res.end(JSON.stringify({ count: garminCourses })); return; }
   try {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString());

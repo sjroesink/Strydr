@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ApiError, downloadGpx, editRoute, generate, loadSearch, previewRoute, saveRoute } from './api';
+import { ApiError, connectUrl, downloadFit, downloadGpx, editRoute, generate, loadSearch, previewRoute, saveRoute, sendRoute } from './api';
 import { LocationSearch } from './components/LocationSearch';
 import RouteMap, { ROUTE_COLORS, type MapMarkerTarget, type MapPadding } from './components/RouteMap';
-import type { Activity, Location, Place, RouteCandidate } from './types';
+import type { Activity, Location, Place, RouteCandidate, ServiceKind } from './types';
+import { ConnectionsPanel } from './components/ConnectionsPanel';
+import { readConnectReturn, rememberSendIntent, takeSendIntent } from './connectReturn';
+import { SERVICE_NAMES, useConnections } from './useConnections';
 import { insertionIndex as findInsertionIndex } from './routeEditing';
 import { Icon } from './components/Icon';
 import { useTheme, type ThemePreference } from './useTheme';
@@ -167,7 +170,11 @@ function Planner() {
   const [error, setError] = useState<Message[]>([]);
   const [notice, setNotice] = useState<Message | null>(null);
   const [locating, setLocating] = useState(false);
-  const [exporting, setExporting] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<{ id: string; format: 'gpx' | 'fit' } | null>(null);
+  const { connections, setConnected, disconnect } = useConnections();
+  const [sending, setSending] = useState<string | null>(null);
+  // Read before the saved-search restore rewrites the URL.
+  const [connectReturn, setConnectReturn] = useState(() => readConnectReturn(window.location.search));
   const [restoring, setRestoring] = useState(false);
   const generation = useRef<AbortController | null>(null);
   const restoration = useRef<AbortController | null>(null);
@@ -562,16 +569,43 @@ function Planner() {
       if (id && id !== selectedId) selectRoute(id);
     }, 140);
   }
-  async function exportRoute(candidate: RouteCandidate) {
+  async function exportRoute(candidate: RouteCandidate, format: 'gpx' | 'fit' = 'gpx') {
     exportingController.current?.abort();
     const controller = new AbortController(); exportingController.current = controller;
-    setExporting(candidate.id); setError([]);
-    try { await downloadGpx(candidate, controller.signal); }
+    setExporting({ id: candidate.id, format }); setError([]);
+    try { await (format === 'fit' ? downloadFit : downloadGpx)(candidate, controller.signal); }
     catch (ex) {
       if (!controller.signal.aborted) setError(ex instanceof ApiError && ex.problem.status === 404
         ? [{ key: 'errors.exportExpired' }] : failureMessages(ex, 'error.exportFailed', number));
     } finally { if (!controller.signal.aborted) setExporting(null); }
   }
+  async function sendToService(candidate: RouteCandidate, service: ServiceKind) {
+    const controller = new AbortController();
+    setSending(candidate.id); setError([]); setNotice(null);
+    try {
+      await sendRoute(candidate.id, service, controller.signal);
+      setConnected(service, true);
+      setNotice({ key: 'notice.sent', params: { service: SERVICE_NAMES[service] } });
+    } catch (ex) {
+      if (ex instanceof ApiError && ex.problem.status === 401) setConnected(service, false);
+      setError(failureMessages(ex, 'error.sendFailed', number));
+    } finally { setSending(null); }
+  }
+  async function disconnectService(service: ServiceKind) {
+    try { await disconnect(service); } catch (ex) { setError(failureMessages(ex, 'error.disconnectFailed', number)); }
+  }
+
+  useEffect(() => {
+    if (!connectReturn || phase !== 'done') return;
+    setConnectReturn(null);
+    const intended = takeSendIntent(connectReturn.service);
+    if (connectReturn.failed) { setError([{ key: 'errors.connectDenied' }]); return; }
+    // Only a route the visitor chose before connecting is sent; the URL alone is never enough.
+    if (!connectReturn.send || !intended) return;
+    const route = candidates.find(item => item.id === intended);
+    if (route) void sendToService(route, connectReturn.service);
+    else setError([{ key: 'errors.routeNotFound' }]);
+  }, [connectReturn, phase, candidates]);
 
   const km = Number(distance);
   const distanceValid = Number.isFinite(km) && km >= .5 && km <= MAX_DISTANCE;
@@ -759,12 +793,24 @@ function Planner() {
                   onClick={() => void beginEditing(candidate)} aria-label={t('route.editLabel', { n: index + 1 })}>
                   <Icon name="edit" />{t('route.edit')}</button>
                 <button type="button" className="route-action route-action-download" disabled={exporting !== null} onClick={() => void exportRoute(candidate)}>
-                  <Icon name="download" />{exporting === candidate.id ? t('route.preparing') : t('route.download')}</button>
+                  <Icon name="download" />{exporting?.id === candidate.id && exporting.format === 'gpx' ? t('route.preparing') : t('route.download')}</button>
+              </div>
+              <div className="route-card-more">
+                <button type="button" className="text-link" disabled={exporting !== null} onClick={() => void exportRoute(candidate, 'fit')}>
+                  <Icon name="download" />{exporting?.id === candidate.id && exporting.format === 'fit' ? t('route.preparing') : t('route.downloadFit')}</button>
+                {candidate.searchId && connections.map(({ service, connected }) => {
+                  const label = <><Icon name="send" />{sending === candidate.id ? t('route.sending') : t('route.sendTo', { service: SERVICE_NAMES[service] })}</>;
+                  return connected
+                    ? <button key={service} type="button" className="text-link" disabled={sending !== null} onClick={() => void sendToService(candidate, service)}>{label}</button>
+                    : <a key={service} className="text-link" onClick={() => rememberSendIntent(service, candidate.id)} href={connectUrl(service, `${savedSearchPath(candidate.searchId!, candidate.id)}&send=${service}`)}>{label}</a>;
+                })}
               </div>
             </li>;
           })}</ul>
           {candidates[0].searchId ? <p className="export-note"><Icon name="link" /><a href={savedSearchPath(candidates[0].searchId, selectedId ?? candidates[0].id)}>{t('results.savedLink')}</a></p>
             : candidates[0].expiresAt && <p className="export-note">{t('results.downloadsUntil', { time: new Date(candidates[0].expiresAt).toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' }) })}</p>}
+          {candidates[0].searchId && <ConnectionsPanel connections={connections}
+            returnUrl={savedSearchPath(candidates[0].searchId, selectedId ?? candidates[0].id)} onDisconnect={service => void disconnectService(service)} />}
         </> : phase === 'done' ? <div className="empty-state"><h2>{t('results.none')}</h2><p>{t('results.noneHint')}</p></div>
           : <p className="loading-state" role="status"><span className="spinner" />{restoring ? t('actions.opening') : t('actions.finding')}</p>}
       </section>

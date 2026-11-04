@@ -7,7 +7,8 @@ export default defineConfig({
   server: {
     port: 5173, strictPort: true,
     // /map serves local basemap files (PMTiles, glyphs, sprites) when the API has MapData:Path set.
-    proxy: Object.fromEntries(['/api', '/map'].map(path => [path, { target: process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:5080', changeOrigin: true }])),
+    // The API compares the browser's Host with PublicBaseUrl for OAuth cookies, so the proxy must not rewrite it.
+    proxy: Object.fromEntries(['/api', '/map'].map(path => [path, { target: process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:5080', changeOrigin: false }])),
   },
   test: { environment: 'jsdom', globals: true, setupFiles: ['./src/test/setup.ts'], include: ['src/**/*.test.{ts,tsx}'] },
 });

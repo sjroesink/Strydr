@@ -1,13 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import { ApiError, downloadGpx, editRoute, generate, loadSearch, previewRoute, saveRoute } from './api';
+import { ApiError, connectUrl, disconnect, downloadFit, downloadGpx, editRoute, generate, listConnections, loadSearch, previewRoute, saveRoute, sendRoute } from './api';
 import { candidate } from './test/fixtures';
 import type { Location, SavedRouteSearch } from './types';
 
 vi.mock('./api', async importOriginal => {
   const actual = await importOriginal<typeof import('./api')>();
-  return { ...actual, generate: vi.fn(), editRoute: vi.fn(), saveRoute: vi.fn(), loadSearch: vi.fn(), previewRoute: vi.fn(), downloadGpx: vi.fn(), geocode: vi.fn().mockResolvedValue([]) };
+  return { ...actual, generate: vi.fn(), editRoute: vi.fn(), saveRoute: vi.fn(), loadSearch: vi.fn(), previewRoute: vi.fn(), downloadGpx: vi.fn(), downloadFit: vi.fn(), sendRoute: vi.fn(), disconnect: vi.fn(), listConnections: vi.fn(), geocode: vi.fn().mockResolvedValue([]) };
 });
 vi.mock('./components/RouteMap', () => ({
   ROUTE_COLORS: ['#d3733c', '#466bc3', '#9363a9'],
@@ -28,11 +28,13 @@ vi.mock('./components/RouteMap', () => ({
   </div>,
 }));
 
-afterEach(() => { window.localStorage.removeItem('meander.language'); });
+afterEach(() => { window.localStorage.removeItem('meander.language'); window.sessionStorage.clear(); });
 
 beforeEach(() => {
   window.localStorage.removeItem('meander.language');
   vi.mocked(generate).mockReset(); vi.mocked(downloadGpx).mockReset();
+  vi.mocked(downloadFit).mockReset(); vi.mocked(sendRoute).mockReset(); vi.mocked(disconnect).mockReset();
+  vi.mocked(listConnections).mockReset().mockResolvedValue([]);
   vi.mocked(previewRoute).mockReset();
   vi.mocked(loadSearch).mockReset();
   vi.mocked(editRoute).mockReset(); vi.mocked(saveRoute).mockReset();
@@ -258,6 +260,14 @@ it('creates a loop, selects and highlights candidates, and downloads GPX', async
   expect(screen.getByTestId('highlighted')).toHaveTextContent('route-2');
   await userEvent.click(screen.getAllByRole('button', { name: /Download GPX/ })[1]);
   expect(downloadGpx).toHaveBeenCalledWith(expect.objectContaining({ id: 'route-2' }), expect.any(AbortSignal));
+});
+
+it('downloads a FIT course for the chosen route', async () => {
+  vi.mocked(generate).mockResolvedValue([candidate(1), candidate(2)]);
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  await userEvent.click(await screen.findByRole('button', { name: /Route 2/ }));
+  await userEvent.click(screen.getAllByRole('button', { name: /Download FIT/ })[1]);
+  expect(downloadFit).toHaveBeenCalledWith(expect.objectContaining({ id: 'route-2' }), expect.any(AbortSignal));
 });
 
 it('supports a different end, walking, and a radius', async () => {
@@ -580,4 +590,101 @@ it('shows translated route warnings in Dutch', async () => {
   await userEvent.click(screen.getByRole('button', { name: /Volgende: voorkeuren/ }));
   await userEvent.click(screen.getByRole('button', { name: /Vind mijn routes/ }));
   expect(await screen.findByText('Start 40 m verplaatst naar het dichtstbijzijnde pad.')).toBeInTheDocument();
+});
+
+it('sends a route to a connected Garmin account', async () => {
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  vi.mocked(sendRoute).mockResolvedValue({ externalId: '1', viewUrl: null });
+  vi.mocked(generate).mockResolvedValue(savedSearch().candidates);
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  await userEvent.click((await screen.findAllByRole('button', { name: /Send to Garmin/ }))[0]);
+  expect(sendRoute).toHaveBeenCalledWith('route-1', 'garmin', expect.any(AbortSignal));
+  expect(await screen.findByText(/Route sent to Garmin/)).toBeInTheDocument();
+  expect(screen.getByText('Garmin connected')).toBeInTheDocument();
+});
+
+it('links to Garmin when it is not connected yet', async () => {
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: false }]);
+  vi.mocked(generate).mockResolvedValue(savedSearch().candidates);
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  const link = (await screen.findAllByRole('link', { name: /Send to Garmin/ }))[0];
+  expect(link).toHaveAttribute('href', connectUrl('garmin', '/routes/search-1?route=route-1&send=garmin'));
+  expect(sendRoute).not.toHaveBeenCalled();
+});
+
+const intend = (routeId: string, at = Date.now()) =>
+  window.sessionStorage.setItem('meander.pendingSend', JSON.stringify({ service: 'garmin', routeId, at }));
+const craftedReturn = () => {
+  window.history.replaceState(null, '', '/routes/search-1?route=route-1&send=garmin&connected=garmin');
+  vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  vi.mocked(sendRoute).mockResolvedValue({ externalId: '1', viewUrl: null });
+};
+
+it('does not send for a crafted return without a remembered intent', async () => {
+  craftedReturn();
+  render(<App />);
+  expect(await screen.findByText('Garmin connected')).toBeInTheDocument();
+  expect(sendRoute).not.toHaveBeenCalled();
+});
+
+it('does not send a stale intent', async () => {
+  craftedReturn(); intend('route-1', Date.now() - 16 * 60 * 1000);
+  render(<App />);
+  expect(await screen.findByText('Garmin connected')).toBeInTheDocument();
+  expect(sendRoute).not.toHaveBeenCalled();
+  expect(window.sessionStorage.getItem('meander.pendingSend')).toBeNull();
+});
+
+it('sends the remembered route even when the URL names another', async () => {
+  craftedReturn(); intend('route-2');
+  render(<App />);
+  await waitFor(() => expect(sendRoute).toHaveBeenCalledWith('route-2', 'garmin', expect.any(AbortSignal)));
+  expect(sendRoute).toHaveBeenCalledTimes(1);
+});
+
+it('sends the route automatically after returning from Garmin', async () => {
+  intend('route-2');
+  window.history.replaceState(null, '', '/routes/search-1?route=route-2&send=garmin&connected=garmin');
+  vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  vi.mocked(sendRoute).mockResolvedValue({ externalId: '1', viewUrl: null });
+  render(<App />);
+  await waitFor(() => expect(sendRoute).toHaveBeenCalledWith('route-2', 'garmin', expect.any(AbortSignal)));
+  expect(sendRoute).toHaveBeenCalledTimes(1);
+  expect(window.location.search).toBe('?route=route-2');
+});
+
+it('only connects, without sending, when returning from the connections panel', async () => {
+  window.history.replaceState(null, '', '/routes/search-1?route=route-2&connected=garmin');
+  vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  render(<App />);
+  expect(await screen.findByText('Garmin connected')).toBeInTheDocument();
+  expect(sendRoute).not.toHaveBeenCalled();
+  expect(window.location.search).toBe('?route=route-2');
+});
+
+it('shows the Preparing label on the export button that was clicked', async () => {
+  vi.mocked(generate).mockResolvedValue([candidate()]);
+  let finish: () => void = () => {};
+  vi.mocked(downloadFit).mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  await userEvent.click(await screen.findByRole('button', { name: /Download FIT/ }));
+  expect(await screen.findByRole('button', { name: /Preparing/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /Download GPX/ })).toBeDisabled();
+  finish();
+  expect(await screen.findByRole('button', { name: /Download FIT/ })).toBeEnabled();
+});
+
+it('reports a cancelled connection and an expired one', async () => {
+  window.history.replaceState(null, '', '/routes/search-1?route=route-1&connectError=garmin');
+  vi.mocked(loadSearch).mockResolvedValue(savedSearch('search-1'));
+  vi.mocked(listConnections).mockResolvedValue([{ service: 'garmin', connected: true }]);
+  vi.mocked(sendRoute).mockRejectedValue(new ApiError({ status: 401, code: 'connectionExpired' }));
+  render(<App />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('The connection was cancelled');
+  await userEvent.click((await screen.findAllByRole('button', { name: /Send to Garmin/ }))[0]);
+  expect(await screen.findByRole('alert')).toHaveTextContent('The connection has expired');
+  expect((await screen.findAllByRole('link', { name: /Send to Garmin/ }))[0]).toBeInTheDocument();
 });

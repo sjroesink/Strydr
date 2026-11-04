@@ -30,6 +30,10 @@ services:
       Woodland__TimeoutSeconds: "15"
       Woodland__MaxResponseMegabytes: "64"
       MapData__Path: /app/map
+      # Garmin Connect integration; empty client id = off. Values come from the stack's .env (not in git).
+      PublicBaseUrl: https://meander.roesink.dev
+      Integrations__Garmin__ClientId: ${GARMIN_CLIENT_ID:-}
+      Integrations__Garmin__ClientSecret: ${GARMIN_CLIENT_SECRET:-}
     volumes:
       # Writable by the image's non-root user (uid 1654).
       - /mnt/user/appdata/meander/data:/app/data

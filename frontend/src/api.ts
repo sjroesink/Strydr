@@ -1,5 +1,5 @@
 import type { Language } from './i18n';
-import type { ApiProblem, RouteCandidate, RouteEditSession, RoutePreviewRequest, RouteRequest, SavedRouteSearch, Suggestion } from './types';
+import type { ApiProblem, RouteCandidate, RouteEditSession, RoutePreviewRequest, RouteRequest, SavedRouteSearch, SentRoute, ServiceConnectionStatus, ServiceKind, Suggestion } from './types';
 
 export class ApiError extends Error {
   problem: ApiProblem;
@@ -43,14 +43,27 @@ export async function saveRoute(request: RouteRequest, signal: AbortSignal): Pro
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal,
   }))).json() as Promise<RouteCandidate[]>;
 }
-export async function downloadGpx(candidate: RouteCandidate, signal: AbortSignal) {
-  const response = await checked(await fetch(`/api/routes/${candidate.id}/gpx`, { signal }));
+async function downloadRoute(candidate: RouteCandidate, format: 'gpx' | 'fit', signal: AbortSignal) {
+  const response = await checked(await fetch(`/api/routes/${candidate.id}/${format}`, { signal }));
   const url = URL.createObjectURL(await response.blob());
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `meander-${candidate.distanceKm.toFixed(1)}km.gpx`;
+  anchor.download = `meander-${candidate.distanceKm.toFixed(1)}km.${format}`;
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+export const downloadGpx = (candidate: RouteCandidate, signal: AbortSignal) => downloadRoute(candidate, 'gpx', signal);
+export const downloadFit = (candidate: RouteCandidate, signal: AbortSignal) => downloadRoute(candidate, 'fit', signal);
+export async function listConnections(signal?: AbortSignal): Promise<ServiceConnectionStatus[]> {
+  return (await checked(await fetch('/api/connections', { signal }))).json() as Promise<ServiceConnectionStatus[]>;
+}
+export const connectUrl = (service: ServiceKind, returnUrl: string) =>
+  `/api/connections/${service}/authorize?returnUrl=${encodeURIComponent(returnUrl)}`;
+export async function disconnect(service: ServiceKind) {
+  await checked(await fetch(`/api/connections/${service}`, { method: 'DELETE' }));
+}
+export async function sendRoute(id: string, service: ServiceKind, signal: AbortSignal): Promise<SentRoute> {
+  return (await checked(await fetch(`/api/routes/${encodeURIComponent(id)}/send/${service}`, { method: 'POST', signal }))).json() as Promise<SentRoute>;
 }
