@@ -75,10 +75,62 @@ function useMapPadding(deps: unknown[]) {
   return padding;
 }
 
+// On phones the planner sheet follows a vertical swipe: down to step back for
+// the map, up to bring it back. Content scrolling keeps priority over the swipe.
+function useSheetSwipe(collapsed: boolean, setCollapsed: (collapsed: boolean) => void) {
+  const sheet = useRef<HTMLElement>(null);
+  const swipe = useRef<{ x: number; y: number; dy: number; active: boolean } | null>(null);
+  const COLLAPSED_HEIGHT = 140;
+
+  function reset() {
+    const element = sheet.current;
+    if (!element) return;
+    element.classList.remove('is-swiping');
+    element.style.transform = ''; element.style.maxHeight = '';
+  }
+  function onTouchStart(event: React.TouchEvent) {
+    swipe.current = null;
+    const element = sheet.current;
+    if (!element || event.touches.length !== 1 || window.matchMedia('(min-width: 760px)').matches) return;
+    const target = event.target as Element;
+    if (target.closest('input[type="range"]')) return;
+    const body = element.querySelector('.sheet-body');
+    const fromGrabber = target.closest('.sheet-grabber') !== null;
+    if (!fromGrabber && !collapsed && (body?.scrollTop ?? 0) > 0) return;
+    const touch = event.touches[0];
+    swipe.current = { x: touch.clientX, y: touch.clientY, dy: 0, active: false };
+  }
+  function onTouchMove(event: React.TouchEvent) {
+    const state = swipe.current, element = sheet.current;
+    if (!state || !element) return;
+    const touch = event.touches[0];
+    const dx = touch.clientX - state.x, dy = touch.clientY - state.y;
+    if (!state.active) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      // Sideways swipes belong to the route carousel, the other direction to scrolling.
+      if (Math.abs(dx) > Math.abs(dy) || (collapsed ? dy > 0 : dy < 0)) { swipe.current = null; return; }
+      state.active = true;
+      element.classList.add('is-swiping');
+    }
+    state.dy = dy;
+    if (collapsed) element.style.maxHeight = `${COLLAPSED_HEIGHT - Math.min(0, dy)}px`;
+    else element.style.transform = `translateY(${Math.max(0, dy)}px)`;
+  }
+  function onTouchEnd() {
+    const state = swipe.current;
+    swipe.current = null;
+    if (!state?.active) return;
+    reset();
+    if (collapsed ? state.dy < -50 : state.dy > 70) setCollapsed(!collapsed);
+  }
+  return { ref: sheet, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: onTouchEnd };
+}
+
 export default function App() {
   const { preference: themePreference, colorScheme, changePreference } = useTheme();
   const [step, setStep] = useState<Step>('start');
   const [sheetCollapsed, setSheetCollapsed] = useState(false);
+  const sheetSwipe = useSheetSwipe(sheetCollapsed, setSheetCollapsed);
   const [hintDismissed, setHintDismissed] = useState(readHintDismissed);
   const [fitRequest, setFitRequest] = useState(0);
   const [start, setStart] = useState<Place | null>(null);
@@ -783,11 +835,11 @@ export default function App() {
     </div>;
   }
 
-  return <div className={`app-shell step-${view} ${sheetCollapsed ? 'sheet-collapsed' : ''} ${mode !== 'browse' ? 'is-picking' : ''}`}
+  return <div className={`app-shell step-${view} ${sheetCollapsed ? 'sheet-collapsed' : ''} ${mode === 'draw' ? 'is-drawing' : ''}`}
     style={{ '--inset-top': `${padding.top}px`, '--inset-bottom': `${padding.bottom}px`, '--inset-left': `${padding.left}px` } as React.CSSProperties}>
     {routeMap}
     <header className="top-bar" data-map-overlay="topbar">{brand}{themePicker}</header>
-    <aside className="planner-sheet" aria-label="Route planner" data-map-overlay="sheet">
+    <aside className="planner-sheet" aria-label="Route planner" data-map-overlay="sheet" {...sheetSwipe}>
       <button type="button" className="sheet-grabber" aria-expanded={!sheetCollapsed}
         aria-label={sheetCollapsed ? 'Show the planner' : 'Show more map'} onClick={() => setSheetCollapsed(value => !value)}><span /></button>
       <div className="sheet-body">
