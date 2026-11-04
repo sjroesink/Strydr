@@ -275,8 +275,28 @@ public sealed class GarminTests
         Assert.Equal("WALKING", course.ActivityType);
         Assert.Equal("WGS84", course.CoordinateSystem);
         Assert.Equal(2000, course.Distance);
+        Assert.Equal(12.5, course.ElevationGain);
+        Assert.Equal(12.5, course.ElevationLoss);
         Assert.Equal(new GarminGeoPoint(52.09, 5.12, 12.5), course.GeoPoints[0]);
         Assert.Null(course.GeoPoints[1].Elevation);
+    }
+
+    [Fact]
+    public void ElevationLossFollowsTheDescentsWhenEveryPointHasAnElevation()
+    {
+        var points = new[] { 10.0, 30, 20 }.Select((e, i) => Geo.Destination(Fixtures.Start, 90, i * .5) with { ElevationM = e });
+        var route = Fixtures.Candidate() with { Geometry = LineString.From(points.ToArray()), ElevationGainM = 20 };
+        var course = GarminCourseMapper.Map(route, Activity.Running);
+        Assert.Equal(20, course.ElevationGain);
+        Assert.Equal(10, course.ElevationLoss);
+    }
+
+    [Fact]
+    public void GarminGetsZeroElevationWhenTheRouteHasNone()
+    {
+        var course = GarminCourseMapper.Map(Fixtures.Candidate() with { ElevationGainM = null }, Activity.Running);
+        Assert.Equal(0, course.ElevationGain);
+        Assert.Equal(0, course.ElevationLoss);
     }
 
     [Theory]
