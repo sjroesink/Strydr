@@ -20,6 +20,7 @@ public sealed class WoodlandMap
     private readonly STRtree<IPreparedGeometry> index = new();
     private readonly Location center;
     private readonly Location[] pathPoints;
+    private readonly STRtree<Location> pathIndex = new();
     public int PolygonCount { get; }
 
     public WoodlandMap(Location center, IReadOnlyList<WoodlandPolygon> polygons, IReadOnlyList<Location> paths)
@@ -40,14 +41,23 @@ public sealed class WoodlandMap
         }
         index.Build();
         pathPoints = paths.Where(Contains).DistinctBy(p => (Math.Round(p.Latitude, 5), Math.Round(p.Longitude, 5))).ToArray();
+        foreach (var point in pathPoints) pathIndex.Insert(new Envelope(Coordinate(point)), point);
+        pathIndex.Build();
     }
 
     private Coordinate Coordinate(Location p) => new(center.Longitude + ((p.Longitude - center.Longitude + 540) % 360) - 180, p.Latitude);
 
+    // Mapped forest is often split along the paths that cross it (common in imported Dutch data),
+    // which leaves a forest path just outside every polygon. Points this close still count.
+    private const double EdgeToleranceDegrees = 20 / 111_320.0;
+
     public bool Contains(Location location)
     {
         var point = Factory.CreatePoint(Coordinate(location));
-        return index.Query(point.EnvelopeInternal).Any(polygon => polygon.Covers(point));
+        if (index.Query(point.EnvelopeInternal).Any(polygon => polygon.Covers(point))) return true;
+        var near = new Envelope(point.Coordinate);
+        near.ExpandBy(EdgeToleranceDegrees);
+        return index.Query(near).Any(polygon => polygon.Geometry.IsWithinDistance(point, EdgeToleranceDegrees));
     }
 
     public WoodlandMeasure Measure(IReadOnlyList<Location> geometry)
@@ -79,16 +89,40 @@ public sealed class WoodlandMap
         Clusters(start, end, maxDistanceKm, radiusCenter, radiusKm)
             .OrderByDescending(target => target.Priority(start, end, maxDistanceKm)).Take(3).ToArray();
 
-    // Woodland the user pointed at: clusters with a path within focusKm of the focus
-    // (the last drawn point), nearest first, regardless of how cheap other forests are.
-    // A forest whose nearest path lies closer to home belongs to the way back, not the focus.
-    public IReadOnlyList<WoodlandTarget> TargetsNear(Location focus, Location end, double maxDistanceKm,
-        Location radiusCenter, double? radiusKm, double focusKm) =>
-        Clusters(focus, end, maxDistanceKm, radiusCenter, radiusKm)
-            .Select(target => (Target: target, Nearest: target.Points.MinBy(p => Geo.DistanceKm(focus, p))!))
-            .Select(t => (t.Target, t.Nearest, Distance: Geo.DistanceKm(focus, t.Nearest)))
-            .Where(t => t.Distance <= focusKm && t.Distance <= Geo.DistanceKm(t.Nearest, end))
-            .OrderBy(t => t.Distance).Take(3).Select(t => t.Target).ToArray();
+    // Loops from the start as ovals of the requested length, ranked by how much of the line
+    // through their anchors runs in woodland. An oval can string several forest blocks together,
+    // which a circuit inside a single block cannot do once the route outgrows that block.
+    // With a home to return to afterwards, only ovals on the side away from home qualify.
+    public IReadOnlyList<WoodlandLoop> Loops(Location start, double distanceKm, Location radiusCenter, double? radiusKm,
+        Location? home = null)
+    {
+        var away = home is { } h && Geo.DistanceKm(h, start) > .05 ? Geo.Bearing(h, start) : (double?)null;
+        var ranked = Enumerable.Range(0, 16).Select(i => i * 22.5)
+            .Where(bearing => away is null || AngleBetween(bearing, away.Value) <= 90)
+            .SelectMany(bearing => WoodlandLoop.Shapes.Select(stretch => new WoodlandLoop(this, start, bearing, stretch)))
+            .Select(loop => (Loop: loop, Points: loop.Waypoints(distanceKm, 1, 1, point => point)))
+            .Where(c => radiusKm is null || c.Points.All(p => Geo.DistanceKm(radiusCenter, p) <= radiusKm * .98))
+            // Forest length rather than share, so an oval that lost most anchors does not win as a short spur.
+            .Select(c => (c.Loop, Cover: Measure(c.Points).Percent / 100 * c.Points.Zip(c.Points.Skip(1), Geo.DistanceKm).Sum()))
+            .Where(c => c.Cover > 0).OrderByDescending(c => c.Cover).ToArray();
+        var loops = new List<WoodlandLoop>();
+        // Directions that barely touch the woodland would only spend attempts on farmland.
+        foreach (var (loop, _) in ranked.TakeWhile(c => c.Cover >= ranked[0].Cover / 2))
+            if (loops.All(other => AngleBetween(loop.Bearing, other.Bearing) >= 30))
+                loops.Add(loop);
+        return loops;
+    }
+
+    private static double AngleBetween(double a, double b) => Math.Abs((a - b + 540) % 360 - 180);
+
+    internal Location? NearestPath(Location point, double maxKm, Func<Location, bool>? allowed = null)
+    {
+        var near = new Envelope(Coordinate(point));
+        near.ExpandBy(maxKm / 111.32 / Math.Max(.1, Math.Cos(point.Latitude * Math.PI / 180)), maxKm / 111.32);
+        return pathIndex.Query(near).Where(p => allowed?.Invoke(p) ?? true)
+            .Select(p => (Point: p, Distance: Geo.DistanceKm(point, p))).Where(p => p.Distance <= maxKm)
+            .OrderBy(p => p.Distance).Select(p => (Location?)p.Point).FirstOrDefault();
+    }
 
     private IEnumerable<WoodlandTarget> Clusters(Location start, Location end, double maxDistanceKm,
         Location radiusCenter, double? radiusKm)
@@ -150,6 +184,42 @@ public sealed class WoodlandTarget(IReadOnlyList<Location> points)
         foreach (var point in anchors)
             if (Geo.DistanceKm(result[^1], point) > .02) result.Add(point);
         if (Geo.DistanceKm(result[^1], end) > .001) result.Add(end);
+        return result;
+    }
+}
+
+public sealed class WoodlandLoop(WoodlandMap map, Location start, double bearing, double stretch)
+{
+    // Semi-axis along the bearing divided by the one across it: round, long and wide ovals.
+    public static readonly double[] Shapes = [1, 2, .5];
+    public double Bearing { get; } = bearing;
+
+    // Anchors around an oval through the start whose centre lies along the bearing, each moved
+    // onto a nearby woodland path. Paths wind roughly a quarter beyond the oval they trace.
+    // Turn picks the direction of travel; scale resizes the oval to correct a measured distance.
+    // Finish replaces the return to the start when the route continues elsewhere.
+    public IReadOnlyList<Location> Waypoints(double distanceKm, int turn, double scale, Func<Location, Location> clamp,
+        Location? finish = null)
+    {
+        // Ramanujan's perimeter for semi-axes stretch*b and b.
+        var h = Math.Pow(stretch - 1, 2) / Math.Pow(stretch + 1, 2);
+        var across = distanceKm / 1.25 / (Math.PI * (stretch + 1) * (1 + 3 * h / (10 + Math.Sqrt(4 - 3 * h)))) * scale;
+        var along = across * stretch;
+        var center = Geo.Destination(start, Bearing, along);
+        var snapKm = (along + across) / 2 * .75;
+        var oval = Enumerable.Range(1, 5).Select(i => Math.PI + turn * i * 2 * Math.PI / 6)
+            .Select(angle => Geo.Destination(Geo.Destination(center, Bearing, along * Math.Cos(angle)), Bearing + 90, across * Math.Sin(angle)))
+            .ToArray();
+        // An anchor without woodland nearby adds nothing; the router links its neighbours itself.
+        // Before heading elsewhere, stay out of woodland nearer that destination than the start:
+        // that belongs to the way there, not to this oval.
+        var homeKm = finish is null ? 0 : Geo.DistanceKm(start, finish);
+        var anchors = oval.Select(point => map.NearestPath(point, snapKm, p => finish is null || Geo.DistanceKm(p, finish) >= homeKm))
+            .OfType<Location>().ToArray();
+        var result = new List<Location> { start };
+        foreach (var anchor in (anchors.Length > 0 ? anchors : oval).Select(clamp))
+            if (Geo.DistanceKm(result[^1], anchor) > .02) result.Add(anchor);
+        result.Add(finish ?? start);
         return result;
     }
 }

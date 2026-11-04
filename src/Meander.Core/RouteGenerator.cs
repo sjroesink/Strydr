@@ -160,6 +160,37 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
                     return Attempt(() => provider.ViaPointsAsync(new(points, request.Activity, Preferences: preferences), ct));
                 }));
             }
+            var woodlandLoops = completionIsLoop && woodland is not null
+                ? woodland.Loops(searchStart, SearchDistance(0), request.Start!, request.RadiusKm) : [];
+
+            // Ovals through the woodland from the search start, then on to finish: a first round of
+            // differently aimed ovals, then each resized by its measured error. An oval that already
+            // fits makes room for the next direction. Overhead is the distance outside the oval itself.
+            async Task SearchWoodlandLoops(int budget, Func<int, double> ovalKm, double overheadKm, Location finish)
+            {
+                var firstCount = budget / 2;
+                Location Clamp(Location point) => request.RadiusKm is { } radius ? Geo.Inside(point, request.Start!, radius * .9) : point;
+                async Task<(int Loop, int Turn, double Scale, bool Hit)> Probe(int i)
+                {
+                    var (loop, turn) = (i % woodlandLoops.Count, i / woodlandLoops.Count % 2 == 0 ? 1 : -1);
+                    var desired = ovalKm(i);
+                    var points = woodlandLoops[loop].Waypoints(desired, turn, 1, Clamp, finish);
+                    var result = await Attempt(() => provider.ViaPointsAsync(new(points, request.Activity, Preferences: preferences), ct));
+                    var actual = result?.DistanceKm - overheadKm;
+                    var scale = actual is > 0 ? Math.Clamp(desired / actual.Value, .4, 2.5) : .7;
+                    return (loop, turn, scale, result is not null && distanceRange.Contains(result.DistanceKm));
+                }
+                var probes = await Task.WhenAll(Enumerable.Range(0, firstCount).Select(Probe));
+                await Task.WhenAll(Enumerable.Range(0, budget - firstCount).Select(i =>
+                {
+                    var probe = probes[i % probes.Length];
+                    var (loop, turn, scale) = !probe.Hit ? (probe.Loop, probe.Turn, probe.Scale)
+                        : probe.Loop + firstCount < woodlandLoops.Count ? (probe.Loop + firstCount, probe.Turn, 1.0)
+                        : (probe.Loop, -probe.Turn, 1.0);
+                    var points = woodlandLoops[loop].Waypoints(ovalKm(i + firstCount), turn, scale, Clamp, finish);
+                    return Attempt(() => provider.ViaPointsAsync(new(points, request.Activity, Preferences: preferences), ct));
+                }));
+            }
             if (start.SnapDistanceM > options.SnapWarningM)
                 warnings.Add(new("startSnapped", $"Start moved {start.SnapDistanceM:F0} m to the nearest routable path."));
             if (!isLoop && end.SnapDistanceM > options.SnapWarningM)
@@ -173,11 +204,11 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
             {
                 // The user already drew a complete loop. Keep it intact.
             }
-            else if (completionIsLoop && woodlandTargets.Count > 0)
+            else if (completionIsLoop && woodlandLoops.Count > 0)
             {
-                // Eight directed forest circuits, plus two general alternatives as fallback.
+                // Eight loops through the woodland, plus two general alternatives as fallback.
                 // This keeps the existing ten-directions-call budget.
-                await Task.WhenAll(SearchWoodland(8), Task.WhenAll(Enumerable.Range(0, 2).Select(i =>
+                await Task.WhenAll(SearchWoodlandLoops(8, SearchDistance, fixedDistanceKm, searchStart), Task.WhenAll(Enumerable.Range(0, 2).Select(i =>
                     Attempt(() => provider.RoundTripAsync(new(searchStart, SearchDistance(i), 3 + i,
                         Random.Shared.Next(1, int.MaxValue), request.Activity, preferences), ct)))));
             }
@@ -290,15 +321,12 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
                     var exploreKm = request.TargetDistanceKm - baseline.DistanceKm;
                     if (exploreDrawn && exploreKm >= .6)
                     {
-                        var focusKm = Math.Max(1, exploreKm / 3);
                         focus = (searchStart, Math.Max(.5, exploreKm / 3), draft!.Route.Geometry.Count);
-                        var near = woodland?.TargetsNear(searchStart, end.Snapped, Math.Max(.01, distanceRange.MaxKm - fixedDistanceKm),
-                            request.Start!, request.RadiusKm, focusKm) ?? [];
-                        if (near.Count > 0)
-                        {
-                            woodlandTargets = near;
-                            await Task.WhenAll(SearchWoodland(6), SearchSide(1, 1), SearchSide(-1, 1));
-                        }
+                        // Woodland ovals beyond the drawn point, before the way home.
+                        woodlandLoops = woodland?.Loops(searchStart, exploreKm, request.Start!, request.RadiusKm, end.Snapped) ?? [];
+                        if (woodlandLoops.Count > 0)
+                            await Task.WhenAll(SearchWoodlandLoops(6, _ => exploreKm, baseline.DistanceKm, end.Snapped),
+                                SearchSide(1, 1), SearchSide(-1, 1));
                         else await Task.WhenAll(SearchLocalLoop(1, exploreKm, 3), SearchLocalLoop(-1, exploreKm, 3), SearchSide(1, 1), SearchSide(-1, 1));
                     }
                     else if (woodlandTargets.Count > 0) await Task.WhenAll(SearchWoodland(6), SearchSide(1, 1), SearchSide(-1, 1));

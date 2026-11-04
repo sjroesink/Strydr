@@ -79,17 +79,57 @@ public sealed class WoodlandTests
     }
 
     [Fact]
-    public void TargetsNearPreferTheForestAtTheDrawnPointOverACheaperOneOnTheWayHome()
+    public void AForestPathBetweenTwoAdjoiningForestPolygonsCountsAsWoodland()
+    {
+        // Imported forest is often cut along its paths, leaving the path in a narrow gap.
+        Location At(double east, double north) => Geo.Destination(Geo.Destination(Fixtures.Start, 90, east), 0, north);
+        WoodlandPolygon Block(double from, double to) => new([At(from, -.5), At(to, -.5), At(to, .5), At(from, .5), At(from, -.5)], []);
+        var map = new WoodlandMap(Fixtures.Start, [Block(0, .995), Block(1.005, 2)], [At(1, 0)]);
+        Assert.True(map.Contains(At(1, 0)));
+        Assert.InRange(map.Measure([At(1, -.4), At(1, .4)]).Percent, 99, 100);
+        Assert.False(map.Contains(At(1, .6)));
+        Assert.False(map.Contains(At(2.1, 0)));
+    }
+
+    [Fact]
+    public void WoodlandLoopsStringSeparateForestBlocksAndRankByForestAlongThem()
+    {
+        // Two blocks east of the start, too far apart for one cluster, but both on a long loop.
+        var near = ForestBlock(.4, 1.6, out var nearPaths);
+        var far = ForestBlock(3, 4.2, out var farPaths);
+        var map = new WoodlandMap(Fixtures.Start, [near, far], [.. nearPaths, .. farPaths]);
+        var loops = map.Loops(Fixtures.Start, 12, Fixtures.Start, null);
+        Assert.NotEmpty(loops);
+        Assert.InRange(loops[0].Bearing, 45, 135);
+        var waypoints = loops.Select(loop => loop.Waypoints(12, 1, 1, point => point)).ToArray();
+        Assert.All(waypoints, points =>
+        {
+            Assert.Equal(Fixtures.Start, points[0]);
+            Assert.Equal(Fixtures.Start, points[^1]);
+            Assert.All(points.Skip(1).SkipLast(1), p => Assert.True(map.Contains(p)));
+        });
+        Assert.Contains(waypoints, points => points.Any(p => Geo.DistanceKm(Fixtures.Start, p) < 1.7)
+            && points.Any(p => Geo.DistanceKm(Fixtures.Start, p) > 3));
+        var cover = waypoints.Select(points => map.Measure(points).Percent * points.Zip(points.Skip(1), Geo.DistanceKm).Sum()).ToArray();
+        Assert.Equal(cover.Max(), cover[0]);
+    }
+
+    [Fact]
+    public void WoodlandLoopsFromADrawnPointStayOnTheSideAwayFromHome()
     {
         var midway = ForestBlock(.6, 1.4, out var midwayPaths);
         var beyond = ForestBlock(3.2, 4.2, out var beyondPaths);
         var map = new WoodlandMap(Fixtures.Start, [midway, beyond], [.. midwayPaths, .. beyondPaths]);
         var focus = Geo.Destination(Fixtures.Start, 90, 3);
-        var general = map.Targets(focus, Fixtures.Start, 10, Fixtures.Start, null);
-        Assert.Contains(general, t => t.Points.All(p => Geo.DistanceKm(Fixtures.Start, p) < 1.5));
-        var near = map.TargetsNear(focus, Fixtures.Start, 10, Fixtures.Start, null, focusKm: 1);
-        var target = Assert.Single(near);
-        Assert.All(target.Points, p => Assert.True(Geo.DistanceKm(Fixtures.Start, p) > 3.1));
+        var loops = map.Loops(focus, 4, Fixtures.Start, null, home: Fixtures.Start);
+        Assert.NotEmpty(loops);
+        Assert.All(loops, loop =>
+        {
+            Assert.InRange(loop.Bearing, 0, 180);
+            var points = loop.Waypoints(4, 1, 1, point => point, finish: Fixtures.Start);
+            Assert.Equal(Fixtures.Start, points[^1]);
+            Assert.All(points.Skip(1).SkipLast(1), p => Assert.True(Geo.DistanceKm(Fixtures.Start, p) > 3.1));
+        });
     }
 
     [Fact]

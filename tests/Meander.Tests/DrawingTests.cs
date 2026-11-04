@@ -93,14 +93,18 @@ public sealed class DrawingTests
         var preview = await generator.PreviewAsync(new(Fixtures.Start, [drawn], PreferGreen: true, PreferUnpaved: true), default);
         var routes = await generator.GenerateAsync(Fixtures.Loop(14) with { DrawnRouteId = preview.Id, PreferGreen = true, PreferUnpaved = true }, default);
         Assert.InRange(provider.ViaQueries.Count - 1, 2, 9);
-        // Forest circuits consist only of woodland path points between the drawn point and home.
+        // Forest ovals consist of woodland path points beyond the drawn point, then head home.
         var forestQueries = provider.ViaQueries.Skip(1).Where(q => q.Points.Count > 2 && q.Points.Skip(1).SkipLast(1).All(map.Contains)).ToArray();
-        Assert.Equal(6, forestQueries.Length);
+        Assert.InRange(forestQueries.Length, 3, 6);
         Assert.All(forestQueries, q =>
         {
             Assert.Equal(drawn, q.Points[0]);
+            Assert.Equal(Fixtures.Start, q.Points[^1]);
             Assert.All(q.Points.Skip(1).SkipLast(1), p => Assert.True(Geo.DistanceKm(Fixtures.Start, p) > 3.1));
         });
+        // No attempt is drawn into the forest on the direct way home.
+        Assert.DoesNotContain(provider.ViaQueries.Skip(1), q => q.Points.Skip(1).SkipLast(1)
+            .Any(p => map.Contains(p) && Geo.DistanceKm(Fixtures.Start, p) < 1.6));
         Assert.True(routes[0].WoodlandPercent > 0);
     }
 
