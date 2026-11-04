@@ -3,6 +3,9 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using Meander.Core;
 using Meander.Infrastructure;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
@@ -10,6 +13,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Http.Resilience;
+using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Timeout;
 
@@ -26,6 +30,8 @@ var woodland = new WoodlandOptions();
 var geocoding = new GeocodingOptions();
 var photon = new PhotonOptions();
 var mapData = new MapDataOptions();
+var connectionOptions = new ConnectionOptions();
+builder.Services.AddSingleton(connectionOptions);
 
 builder.Services.AddSingleton(ors);
 builder.Services.AddSingleton(photon);
@@ -38,6 +44,15 @@ builder.Services.AddSingleton<ProviderBudget>();
 builder.Services.AddTransient<ProviderBudgetHandler>();
 builder.Services.AddSingleton<ICandidateStore, CandidateStore>();
 builder.Services.AddSingleton<IRouteSearchStore, SqliteRouteSearchStore>();
+builder.Services.AddSingleton<IConnectionStore, SqliteConnectionStore>();
+builder.Services.AddTransient<ConnectionService>();
+builder.Services.AddDataProtection().SetApplicationName("Meander");
+// Resolved lazily so test hosts can point the key ring elsewhere.
+builder.Services.AddOptions<KeyManagementOptions>().Configure<IConfiguration, IHostEnvironment>((o, config, env) =>
+{
+    if (config["DataProtection:KeysPath"] is { Length: > 0 } keys)
+        o.XmlRepository = new FileSystemXmlRepository(new DirectoryInfo(Path.GetFullPath(keys, env.ContentRootPath)), Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
+});
 builder.Services.AddTransient<RouteGenerator>();
 builder.Services.AddTransient<RouteEditor>();
 builder.Services.AddHttpClient("woodland", client =>
@@ -97,6 +112,8 @@ builder.Services.AddRateLimiter(o =>
         _ => new FixedWindowRateLimiterOptions { PermitLimit = limits.GeocodePerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     o.AddPolicy("preview", context => RateLimitPartition.GetFixedWindowLimiter(ClientKey(context),
         _ => new FixedWindowRateLimiterOptions { PermitLimit = limits.PreviewPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+    o.AddPolicy("connect", context => RateLimitPartition.GetFixedWindowLimiter(ClientKey(context),
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = limits.ConnectPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
 });
 
 var app = builder.Build();
@@ -108,6 +125,7 @@ builder.Configuration.GetSection("Woodland").Bind(woodland);
 builder.Configuration.GetSection("Geocoding").Bind(geocoding);
 builder.Configuration.GetSection("Photon").Bind(photon);
 builder.Configuration.GetSection("MapData").Bind(mapData);
+connectionOptions.PublicBaseUrl = builder.Configuration["PublicBaseUrl"] ?? "";
 if (geocoding.Provider == GeocodingProviderKind.Photon &&
     (!Uri.TryCreate(photon.BaseUrl, UriKind.Absolute, out var photonUrl) || photonUrl.Scheme is not ("http" or "https")))
     throw new InvalidOperationException("Photon:BaseUrl must be an absolute HTTP or HTTPS URL when Geocoding:Provider is Photon.");
@@ -127,7 +145,11 @@ if (storage.DatabasePath != ":memory:")
 ConfigurationChecks.Validate(ors, generation);
 // Fail at startup if the database location is not writable, before spending routing quota.
 app.Services.GetRequiredService<IRouteSearchStore>();
-if (limits.GeneratePerMinute < 1 || limits.GeocodePerMinute < 1 || limits.PreviewPerMinute < 1 || limits.ConcurrentGenerations < 1)
+app.Services.GetRequiredService<IConnectionStore>();
+if (app.Services.GetRequiredService<ConnectionService>().Configured.Count > 0 &&
+    (!Uri.TryCreate(connectionOptions.PublicBaseUrl, UriKind.Absolute, out var publicBase) || publicBase.Scheme is not ("http" or "https")))
+    throw new InvalidOperationException("Set PublicBaseUrl (for example https://meander.roesink.dev) when a service integration is configured.");
+if (limits.GeneratePerMinute < 1 || limits.GeocodePerMinute < 1 || limits.PreviewPerMinute < 1 || limits.ConnectPerMinute < 1 || limits.ConcurrentGenerations < 1)
     throw new InvalidOperationException("RateLimiting values must be positive integers.");
 // Behind Cloudflare and Traefik every request arrives from the proxy, which would make the
 // per-IP rate limits global. Trust the configured client IP header (e.g. CF-Connecting-IP).
@@ -235,6 +257,7 @@ app.MapGet("/api/routes/{id:guid}/fit", (Guid id, IRouteSearchStore searches, IC
             extensions: new Dictionary<string, object?> { ["code"] = "exportExpired" });
 });
 // API misses must remain ProblemDetails even when the production SPA is present.
+app.MapConnectionEndpoints();
 app.MapFallback("/api/{**path}", () => Results.Problem(statusCode: 404, title: "API endpoint not found", extensions: new Dictionary<string, object?> { ["code"] = "apiNotFound" }));
 app.MapFallback("/map/{**path}", () => Results.Problem(statusCode: 404, title: "Map file not found", extensions: new Dictionary<string, object?> { ["code"] = "mapFileNotFound" }));
 if (hasWebRoot) app.MapFallbackToFile("index.html");
@@ -268,6 +291,7 @@ public sealed class ApiRateOptions
     public int ConcurrentGenerations { get; set; } = 2;
     public int GeocodePerMinute { get; set; } = 60;
     public int PreviewPerMinute { get; set; } = 30;
+    public int ConnectPerMinute { get; set; } = 20;
 }
 
 public static class ConfigurationChecks
