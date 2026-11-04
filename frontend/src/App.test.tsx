@@ -300,6 +300,24 @@ it('supports a different end, walking, and a radius', async () => {
   expect(generate).toHaveBeenCalledWith(expect.objectContaining({ end: { latitude: 52.09, longitude: 5.12 }, activity: 'walking', radiusKm: 3 }), expect.any(AbortSignal));
 });
 
+it('plans rides up to the cycling maximum and clamps the distance when switching back to running', async () => {
+  vi.mocked(generate).mockResolvedValue([candidate()]);
+  render(<App />); await chooseStart();
+  await userEvent.click(screen.getByRole('radio', { name: 'Cycle' }));
+  await toDistance();
+  expect(screen.getByRole('slider', { name: 'Target distance' })).toHaveAttribute('max', '100');
+  expect(screen.getByRole('button', { name: '100 km' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '21.1 km' })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '80 km' }));
+  await toPreferences(); await search();
+  expect(generate).toHaveBeenCalledWith(expect.objectContaining({ activity: 'cycling', targetDistanceKm: 80 }), expect.any(AbortSignal));
+  await userEvent.click(screen.getByRole('button', { name: 'Change start' }));
+  await userEvent.click(screen.getByRole('radio', { name: 'Run' }));
+  await toDistance();
+  expect(screen.getByLabelText('How far?')).toHaveValue(60);
+  expect(screen.getByRole('slider', { name: 'Target distance' })).toHaveAttribute('max', '60');
+});
+
 it('clears stale results and ignores an obsolete response after inputs change', async () => {
   let resolve!: (value: ReturnType<typeof candidate>[]) => void;
   vi.mocked(generate).mockReturnValue(new Promise(done => { resolve = done; }));

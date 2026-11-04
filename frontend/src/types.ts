@@ -1,4 +1,4 @@
-export type Activity = 'running' | 'walking';
+export type Activity = 'running' | 'walking' | 'cycling';
 export type Location = { latitude: number; longitude: number; elevationM?: number | null };
 export type Place = { label: string; location: Location };
 export type RouteRequest = {

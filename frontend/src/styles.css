@@ -149,7 +149,7 @@ button svg { flex-shrink:0; }
 
 /* Step 1 */
 .segmented-control {
-  display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; padding:4px; border-radius:16px; background:var(--surface-input);
+  display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); gap:4px; padding:4px; border-radius:16px; background:var(--surface-input);
 }
 .segmented-control label {
   position:relative; display:flex; align-items:center; justify-content:center; gap:8px; min-height:44px;

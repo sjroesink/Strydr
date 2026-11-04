@@ -8,13 +8,21 @@ import { ExportMenu, SentNotes } from './components/ExportMenu';
 import { readConnectReturn, rememberSendIntent, takeSendIntent } from './connectReturn';
 import { useConnections } from './useConnections';
 import { insertionIndex as findInsertionIndex } from './routeEditing';
-import { Icon } from './components/Icon';
+import { Icon, type IconName } from './components/Icon';
 import { useTheme, type ThemePreference } from './useTheme';
 import { I18nProvider, useI18n, type Message, type MessageKey } from './i18n';
 import { MessageError, failureMessages, warningMessage } from './apiText';
 
 const MAX_DISTANCE = Number(import.meta.env.VITE_MAX_DISTANCE_KM) || 60;
-const QUICK_DISTANCES = [5, 8, 10, 15, 21.1];
+const MAX_CYCLING_DISTANCE = Number(import.meta.env.VITE_MAX_CYCLING_DISTANCE_KM) || 100;
+const maxDistanceFor = (activity: Activity) => activity === 'cycling' ? MAX_CYCLING_DISTANCE : MAX_DISTANCE;
+const quickDistancesFor = (activity: Activity) => activity === 'cycling' ? [25, 40, 60, 80, 100] : [5, 8, 10, 15, 21.1];
+const ACTIVITIES = [
+  { value: 'running', icon: 'run', label: 'activity.running' },
+  { value: 'walking', icon: 'walk', label: 'activity.walking' },
+  { value: 'cycling', icon: 'bike', label: 'activity.cycling' },
+] as const satisfies readonly { value: Activity; icon: IconName; label: MessageKey }[];
+const activityLabel = (activity: Activity) => ACTIVITIES.find(item => item.value === activity)!.label;
 const EDIT_HINT_KEY = 'meander.editHintDismissed';
 const coordinateLabel = (point: Location) => `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`;
 const hiddenRouteWarningCodes = new Set(['backtrackingRemoved', 'surfaceDataIncomplete', 'distanceMiss', 'qualityDataUnavailable', 'woodlandUnavailable']);
@@ -158,6 +166,7 @@ function Planner() {
   const [draftRevision, setDraftRevision] = useState(0);
   const [activity, setActivity] = useState<Activity>('running');
   const [distance, setDistance] = useState('5');
+  const maxDistance = maxDistanceFor(activity);
   const [hasRadius, setHasRadius] = useState(false);
   const [radius, setRadius] = useState('2');
   const [hasFlexibleDistance, setHasFlexibleDistance] = useState(false);
@@ -333,7 +342,7 @@ function Planner() {
       goTo('distance');
     } else if (view === 'distance') {
       const km = Number(distance);
-      if (!Number.isFinite(km) || km < .5 || km > MAX_DISTANCE) { setError([{ key: 'error.distanceRange', params: { min: .5, max: MAX_DISTANCE } }]); return; }
+      if (!Number.isFinite(km) || km < .5 || km > maxDistance) { setError([{ key: 'error.distanceRange', params: { min: .5, max: maxDistance } }]); return; }
       if (hasRadius && (!Number.isFinite(Number(radius)) || Number(radius) <= 0)) { setError([{ key: 'error.radius' }]); return; }
       goTo('preferences');
     }
@@ -344,9 +353,14 @@ function Planner() {
   function changeDistance(value: string) {
     invalidate(); setDistance(value);
   }
+  function chooseActivity(value: Activity) {
+    invalidate(); setActivity(value);
+    // A ride may be longer than a run: keep the distance within the new activity's range.
+    if (Number(distance) > maxDistanceFor(value)) setDistance(String(maxDistanceFor(value)));
+  }
   function nudgeDistance(delta: number) {
     const current = Number(distance) || 0;
-    changeDistance(String(Math.max(.5, Math.min(MAX_DISTANCE, Math.round((current + delta) * 2) / 2))));
+    changeDistance(String(Math.max(.5, Math.min(maxDistance, Math.round((current + delta) * 2) / 2))));
   }
   function pick(which: 'start' | 'end', place: Place) {
     if (mode === 'draw' && which === 'start' && !start) rememberDrawing();
@@ -458,7 +472,7 @@ function Planner() {
     if (drawnPoints.length > 0 && (!draft || draftPhase !== 'ready')) { setError([{ key: 'error.waitForDrawing' }]); return; }
     const km = Number(distance);
     const radiusKm = hasRadius ? Number(radius) : null;
-    if (!Number.isFinite(km) || km < .5 || km > MAX_DISTANCE) { setError([{ key: 'error.distanceRange', params: { min: .5, max: MAX_DISTANCE } }]); return; }
+    if (!Number.isFinite(km) || km < .5 || km > maxDistance) { setError([{ key: 'error.distanceRange', params: { min: .5, max: maxDistance } }]); return; }
     if (radiusKm !== null && (!Number.isFinite(radiusKm) || radiusKm <= 0)) { setError([{ key: 'error.radius' }]); return; }
     invalidate(); setMode('browse');
     const current = revision.current;
@@ -609,11 +623,11 @@ function Planner() {
   }, [connectReturn, phase, candidates]);
 
   const km = Number(distance);
-  const distanceValid = Number.isFinite(km) && km >= .5 && km <= MAX_DISTANCE;
+  const distanceValid = Number.isFinite(km) && km >= .5 && km <= maxDistance;
   const margin = Number(distanceMargin) / 100;
   const distanceWindow = distanceValid
-    ? t('distance.window', { min: number(Math.max(.5, km * (1 - margin)), 2), max: number(Math.min(MAX_DISTANCE, km * (1 + margin)), 2) }) : '';
-  const sliderFill = `${(Math.max(.5, Math.min(MAX_DISTANCE, km || .5)) - .5) / (MAX_DISTANCE - .5) * 100}%`;
+    ? t('distance.window', { min: number(Math.max(.5, km * (1 - margin)), 2), max: number(Math.min(maxDistance, km * (1 + margin)), 2) }) : '';
+  const sliderFill = `${(Math.max(.5, Math.min(maxDistance, km || .5)) - .5) / (maxDistance - .5) * 100}%`;
   const questionIndex = QUESTION_STEPS.findIndex(item => item.step === view);
   const preferenceSummary = [preferGreen && t('summary.green'), preferUnpaved && t('summary.unpaved'), hasEnd && t('summary.oneWay'),
     drawnPoints.length > 0 && !completeDrawing && t('summary.drawn')].filter(Boolean).join(', ') || t('summary.none');
@@ -666,10 +680,10 @@ function Planner() {
       {stepHeader(t('start.title'))}
       <fieldset className="activity-picker"><legend className="visually-hidden">{t('activity.legend')}</legend>
         <div className="segmented-control">
-          {(['running', 'walking'] as const).map(value => <label key={value} className={activity === value ? 'selected' : ''}>
+          {ACTIVITIES.map(({ value, icon, label }) => <label key={value} className={activity === value ? 'selected' : ''}>
             <input type="radio" name="activity" value={value} checked={activity === value}
-              onChange={() => { invalidate(); setActivity(value); }} />
-            <Icon name={value === 'running' ? 'run' : 'walk'} /> {t(value === 'running' ? 'activity.running' : 'activity.walking')}
+              onChange={() => chooseActivity(value)} />
+            <Icon name={icon} /> {t(label)}
           </label>)}
         </div>
       </fieldset>
@@ -685,15 +699,15 @@ function Planner() {
       {stepHeader(<label htmlFor="distance">{t('distance.title')}</label>)}
       <div className="distance-dial">
         <button type="button" className="round-button large" aria-label={t('distance.shorter')} onClick={() => nudgeDistance(-.5)}><Icon name="minus" /></button>
-        <div className="distance-number"><input id="distance" type="number" min="0.5" max={MAX_DISTANCE} step="0.1" inputMode="decimal"
+        <div className="distance-number"><input id="distance" type="number" min="0.5" max={maxDistance} step="0.1" inputMode="decimal"
           value={distance} onChange={e => changeDistance(e.target.value)} /><span>km</span></div>
         <button type="button" className="round-button large" aria-label={t('distance.longer')} onClick={() => nudgeDistance(.5)}><Icon name="plus" /></button>
       </div>
-      <input className="distance-slider" type="range" aria-label={t('distance.slider')} min="0.5" max={MAX_DISTANCE} step="0.1"
+      <input className="distance-slider" type="range" aria-label={t('distance.slider')} min="0.5" max={maxDistance} step="0.1"
         style={{ '--fill': sliderFill } as React.CSSProperties}
-        value={Math.max(.5, Math.min(MAX_DISTANCE, km || .5))} onChange={e => changeDistance(e.target.value)} />
+        value={Math.max(.5, Math.min(maxDistance, km || .5))} onChange={e => changeDistance(e.target.value)} />
       <div className="quick-distances" role="group" aria-label={t('distance.common')}>
-        {QUICK_DISTANCES.filter(value => value <= MAX_DISTANCE).map(value => <button type="button" key={value}
+        {quickDistancesFor(activity).filter(value => value <= maxDistance).map(value => <button type="button" key={value}
           aria-pressed={km === value} aria-label={t('distance.quick', { km: number(value) })} onClick={() => changeDistance(String(value))}>{number(value)}</button>)}
       </div>
       <div className="option-list">
@@ -756,7 +770,7 @@ function Planner() {
     return <>
       <div className="step-summary">
         <button type="button" aria-label={t('summary.changeStart')} onClick={() => goTo('start')}>
-          <Icon name="check" /><span><small>{t('step.start')}</small>{t('summary.start', { activity: t(activity === 'running' ? 'activity.running' : 'activity.walking'), place: start?.label ?? '…' })}</span><span className="summary-change">{t('summary.change')}</span></button>
+          <Icon name="check" /><span><small>{t('step.start')}</small>{t('summary.start', { activity: t(activityLabel(activity)), place: start?.label ?? '…' })}</span><span className="summary-change">{t('summary.change')}</span></button>
         <button type="button" aria-label={t('summary.changeDistance')} onClick={() => goTo('distance')}>
           <Icon name="check" /><span><small>{t('step.distance')}</small>{t('drawing.km', { km: number(km || 0) })}{hasFlexibleDistance ? t('summary.margin', { margin: distanceMargin }) : ''}{hasRadius ? t('summary.within', { km: number(Number(radius)) }) : ''}</span><span className="summary-change">{t('summary.change')}</span></button>
         <button type="button" aria-label={t('summary.changePreferences')} onClick={() => goTo('preferences')}>

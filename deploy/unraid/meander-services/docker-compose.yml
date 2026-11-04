@@ -9,12 +9,16 @@ services:
     restart: unless-stopped
     environment:
       XMS: 1g
-      XMX: 4g
+      # Two profiles (foot-walking, cycling-regular) with elevation; one alone filled 4g.
+      XMX: 8g
       ors.engine.profile_default.build.source_file: /home/ors/files/netherlands-latest.osm.pbf
       ors.engine.profile_default.build.elevation: "true"
       ors.engine.profiles.driving-car.enabled: "false"
       ors.engine.profiles.foot-walking.enabled: "true"
       ors.engine.profiles.foot-walking.build.ext_storages.RoadAccessRestrictions.use_for_warnings: "true"
+      # Cycling; ORS builds this graph next to the existing foot-walking one on the next start.
+      ors.engine.profiles.cycling-regular.enabled: "true"
+      ors.engine.profiles.cycling-regular.build.ext_storages.RoadAccessRestrictions.use_for_warnings: "true"
     volumes:
       - /mnt/user/appdata/meander/ors/files:/home/ors/files:ro
       - /mnt/user/appdata/meander/ors/graphs:/home/ors/graphs
