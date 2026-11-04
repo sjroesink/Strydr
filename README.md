@@ -155,6 +155,10 @@ Appearance follows the system setting by default. The header's system/sun/moon b
 
 Provider limits vary by account. Check your dashboard and [ORS restrictions](https://openrouteservice.org/restrictions/) before increasing budgets. A loop uses ten directions calculations plus one snap call; A→B uses at most nine directions calls plus snapping, before retries. Autocomplete uses a 350 ms debounce after three characters. API authorization headers are never returned to the browser, and HTTP-client URL logging is disabled at the normal log level.
 
+### Languages
+
+The planner is available in Dutch and English. It follows the browser language (Dutch for `nl-*`, English otherwise) until you pick **NL** or **EN** in the top bar; that choice is remembered in the browser. Map labels and place search follow the same language. The API keeps English `message`/`detail` texts and adds stable `code` values (and numeric `params` on warnings and some errors) that the frontend translates.
+
 ## API
 
 `POST /api/routes/generate`, `Content-Type: application/json`:

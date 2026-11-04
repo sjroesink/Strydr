@@ -226,3 +226,15 @@ test('choose a start, generate and inspect routes, and export GPX', async ({ pag
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+test.describe('Dutch browser', () => {
+  test.use({ locale: 'nl-NL' });
+  test('shows the planner in Dutch and switches to English', async ({ page }) => {
+    await page.route('https://fonts.googleapis.com/**', route => route.abort());
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Waar begin je?' })).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'nl');
+    await page.getByRole('button', { name: 'English' }).click();
+    await expect(page.getByRole('heading', { name: 'Where do you start?' })).toBeVisible();
+  });
+});
