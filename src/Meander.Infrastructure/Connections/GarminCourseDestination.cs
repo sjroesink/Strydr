@@ -43,8 +43,10 @@ public sealed class GarminCourseDestination(HttpClient http, GarminOptions optio
         if (!response.IsSuccessStatusCode)
             throw new ProviderException(ProviderFailure.Unavailable, $"Garmin rejected the course ({(int)response.StatusCode}).");
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
-        var id = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("courseId", out var value) ? value.ToString()
-            : throw new ProviderException(ProviderFailure.InvalidResponse, "Garmin returned no course id.");
+        var id = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("courseId", out var value)
+            ? value.ValueKind switch { JsonValueKind.String => value.GetString(), JsonValueKind.Number => value.GetRawText(), _ => null } : null;
+        if (string.IsNullOrEmpty(id))
+            throw new ProviderException(ProviderFailure.InvalidResponse, "Garmin returned no course id.");
         return new SentRoute(id, new Uri($"https://connect.garmin.com/modern/course/{Uri.EscapeDataString(id)}"));
     }
 }

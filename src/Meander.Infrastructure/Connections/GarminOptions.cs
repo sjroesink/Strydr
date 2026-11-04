@@ -24,6 +24,3 @@ public sealed class GarminOptions
                 throw new InvalidOperationException($"Integrations:Garmin URL '{url}' must be an absolute HTTP or HTTPS URL.");
     }
 }
-
-public sealed record GarminDeregistrations(IReadOnlyList<GarminDeregistration>? Deregistrations);
-public sealed record GarminDeregistration(string? UserId);

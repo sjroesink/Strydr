@@ -57,16 +57,19 @@ public sealed class GarminConnector(HttpClient http, GarminOptions options, Time
         return new ServiceTokens(body.AccessToken, body.RefreshToken, clock.GetUtcNow().AddSeconds(Math.Max(0, body.ExpiresIn)), userId);
     }
 
-    private async Task<string?> UserIdAsync(string accessToken, CancellationToken ct)
+    private async Task<string> UserIdAsync(string accessToken, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, options.UserIdUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         using var response = await http.SendAsync(request, ct);
-        if (!response.IsSuccessStatusCode) return null;
+        if (!response.IsSuccessStatusCode) throw NoUserId();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
-        return body.TryGetProperty("userId", out var id) ? id.ToString() : null;
+        var id = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("userId", out var value)
+            ? value.ValueKind switch { JsonValueKind.String => value.GetString(), JsonValueKind.Number => value.GetRawText(), _ => null } : null;
+        return string.IsNullOrEmpty(id) ? throw NoUserId() : id;
     }
 
+    private static ProviderException NoUserId() => new(ProviderFailure.InvalidResponse, "Garmin returned no user id.");
     private sealed record TokenResponse(
         [property: JsonPropertyName("access_token")] string? AccessToken,
         [property: JsonPropertyName("refresh_token")] string? RefreshToken,

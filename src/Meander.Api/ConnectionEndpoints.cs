@@ -17,6 +17,7 @@ public static class ConnectionEndpoints
 {
     public const string SessionCookie = "meander_sid";
     public const string PendingCookie = "meander_oauth";
+    private const int MaxWebhookBytes = 64 * 1024;
     private static readonly TimeSpan PendingLifetime = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(365);
 
@@ -25,10 +26,36 @@ public static class ConnectionEndpoints
     public static void MapConnectionEndpoints(this WebApplication app)
     {
         // Garmin calls this when a user removes Meander in Garmin Connect. Always 200 so Garmin does not retry.
-        app.MapPost("/api/webhooks/garmin/deregistration", (GarminDeregistrations notice, IConnectionStore store, ILogger<ConnectionService> logger) =>
+        app.MapPost("/api/webhooks/garmin/deregistration", async (HttpContext context, GarminOptions garmin, IConnectionStore store, ILogger<ConnectionService> logger) =>
         {
-            var removed = (notice.Deregistrations ?? []).Where(d => !string.IsNullOrWhiteSpace(d.UserId))
-                .Sum(d => store.DeleteByExternalUser(ServiceKind.Garmin, d.UserId!));
+            // Whatever arrives, answer 200: a non-200 only makes Garmin retry a notice we cannot act on.
+            if (!garmin.IsConfigured || !context.Request.HasJsonContentType() || context.Request.ContentLength is > MaxWebhookBytes)
+                return Results.Ok();
+            var removed = 0;
+            try
+            {
+                using var buffer = new MemoryStream();
+                var chunk = new byte[8192];
+                int read;
+                while ((read = await context.Request.Body.ReadAsync(chunk, context.RequestAborted)) > 0)
+                {
+                    buffer.Write(chunk, 0, read);
+                    if (buffer.Length > MaxWebhookBytes) return Results.Ok();
+                }
+                buffer.Position = 0;
+                using var doc = await JsonDocument.ParseAsync(buffer);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object
+                    && doc.RootElement.TryGetProperty("deregistrations", out var list) && list.ValueKind == JsonValueKind.Array)
+                    foreach (var item in list.EnumerateArray())
+                        if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty("userId", out var id)
+                            && id.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(id.GetString()))
+                            removed += store.DeleteByExternalUser(ServiceKind.Garmin, id.GetString()!);
+            }
+            catch (JsonException) { }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Garmin deregistration could not be processed");
+            }
             logger.LogInformation("Garmin deregistration removed {Count} connection(s)", removed);
             return Results.Ok();
         });

@@ -14,6 +14,8 @@ internal sealed class StubGarmin : HttpMessageHandler
 {
     public readonly ConcurrentQueue<(HttpMethod Method, string Url, string? Authorization, string Body)> Requests = new();
     public HttpStatusCode CourseStatus { get; set; } = HttpStatusCode.OK;
+    public HttpStatusCode UserIdStatus { get; set; } = HttpStatusCode.OK;
+    public object CourseResponse { get; set; } = new { courseId = 987654 };
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
@@ -26,9 +28,9 @@ internal sealed class StubGarmin : HttpMessageHandler
                 return new(HttpStatusCode.BadRequest) { Content = JsonContent.Create(new { error = "invalid_grant" }) };
             return Json(new { access_token = $"garmin-access-{form["grant_type"]}", refresh_token = "garmin-refresh", expires_in = 86400, token_type = "bearer" });
         }
-        if (path.EndsWith("/user/id")) return Json(new { userId = "garmin-user-1" });
+        if (path.EndsWith("/user/id")) return UserIdStatus != HttpStatusCode.OK ? new(UserIdStatus) : Json(new { userId = "garmin-user-1" });
         if (path.EndsWith("/user/registration")) return new(HttpStatusCode.NoContent);
-        if (path.EndsWith("/course")) return CourseStatus == HttpStatusCode.OK ? Json(new { courseId = 987654 }) : new(CourseStatus);
+        if (path.EndsWith("/course")) return CourseStatus == HttpStatusCode.OK ? Json(CourseResponse) : new(CourseStatus);
         return new(HttpStatusCode.NotFound);
     }
     private static HttpResponseMessage Json(object value) => new(HttpStatusCode.OK) { Content = JsonContent.Create(value) };
@@ -112,6 +114,66 @@ public sealed class GarminTests
             new { deregistrations = new[] { new { userId = "garmin-user-1" } } });
         Assert.Equal(HttpStatusCode.OK, hook.StatusCode);
         Assert.False((await client.GetFromJsonAsync<JsonElement>("/api/connections"))[0].GetProperty("connected").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("{", "application/json")]
+    [InlineData("{}", "application/json")]
+    [InlineData("null", "application/json")]
+    [InlineData("", "application/json")]
+    [InlineData("{\"deregistrations\":[null, 5, {\"userId\": 7}]}", "application/json")]
+    [InlineData("{\"deregistrations\":\"x\"}", "application/json")]
+    [InlineData("{\"deregistrations\":[{\"userId\":\"garmin-user-1\"}]}", "text/plain")]
+    public async Task MalformedDeregistrationsAlwaysGet200AndChangeNothing(string body, string contentType)
+    {
+        await using var app = App();
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Connect(client);
+        using var hook = await client.PostAsync("/api/webhooks/garmin/deregistration", new StringContent(body, System.Text.Encoding.UTF8, contentType));
+        Assert.Equal(HttpStatusCode.OK, hook.StatusCode);
+        Assert.True((await client.GetFromJsonAsync<JsonElement>("/api/connections"))[0].GetProperty("connected").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ConnectFailsWhenGarminReturnsNoUserId()
+    {
+        garmin.UserIdStatus = HttpStatusCode.InternalServerError;
+        await using var app = App();
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var authorize = await client.GetAsync("/api/connections/garmin/authorize?returnUrl=%2F");
+        var state = QueryHelpers.ParseQuery(authorize.Headers.Location!.Query)["state"];
+        using var callback = await client.GetAsync($"/api/connections/garmin/callback?code=garmin-code&state={state}");
+        Assert.Equal("/?connectError=garmin", callback.Headers.Location!.OriginalString);
+        Assert.False((await client.GetFromJsonAsync<JsonElement>("/api/connections"))[0].GetProperty("connected").GetBoolean());
+    }
+
+    private async Task<HttpResponseMessage> SendRoute()
+    {
+        await using var app = App();
+        using var client = app.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await Connect(client);
+        using var generated = await client.PostAsJsonAsync("/api/routes/generate",
+            new { start = new { latitude = 52.09, longitude = 5.12 }, targetDistanceKm = 5 });
+        var id = (await generated.Content.ReadFromJsonAsync<JsonElement>())[0].GetProperty("id").GetString();
+        return await client.PostAsync($"/api/routes/{id}/send/garmin", null);
+    }
+
+    [Fact]
+    public async Task ACourseResponseWithoutACourseIdIsABadGateway()
+    {
+        garmin.CourseResponse = new { courseId = (string?)null };
+        using var sent = await SendRoute();
+        Assert.Equal(HttpStatusCode.BadGateway, sent.StatusCode);
+        Assert.Equal("serviceUnavailable", (await sent.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task CourseFailuresAreNotRetried()
+    {
+        garmin.CourseStatus = HttpStatusCode.InternalServerError;
+        using var sent = await SendRoute();
+        Assert.Equal(HttpStatusCode.BadGateway, sent.StatusCode);
+        Assert.Single(garmin.Requests, r => r.Url.EndsWith("/course"));
     }
 
     [Fact]
