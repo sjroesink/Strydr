@@ -75,7 +75,9 @@ A later `IActivitySource` takes the same `ServiceTokens` from `ConnectionService
 **`SqliteConnectionStore`**
 - Table: `connections (session_id TEXT, service TEXT, external_user_id TEXT, json TEXT NOT NULL, PRIMARY KEY (session_id, service))`.
 - It uses the same database file, connection style and lock as `SqliteRouteSearchStore`, but performs real upserts and deletes.
-- `json` holds the serialized `ServiceTokens`, encrypted with ASP.NET Data Protection (`IDataProtector` with purpose `Meander.Connections.v1`).
+- `json` holds the serialized `ServiceConnection`, encrypted with ASP.NET Data Protection (`IDataProtector` with purpose `Meander.Connections.v1`).
+- `external_user_id` holds only a SHA-256 hash of the service's user id, which is enough to look it up for deregistration.
+- Rows that cannot be decrypted, for example after the key ring is lost, count as disconnected.
 - Keys are persisted to `DataProtection:KeysPath` (default `data/keys`), on the existing appdata volume.
 
 **`OAuthPkce`** produces a code verifier (32 random bytes, base64url), an S256 challenge and a random state.
@@ -95,8 +97,8 @@ A later `IActivitySource` takes the same `ServiceTokens` from `ConnectionService
 - Garmin's user id is resolved after the token exchange and stored as `ExternalUserId`, for deregistration.
 
 **`GarminCourseDestination : IRouteDestination`**
-- It uses a typed HttpClient with `AddProviderResilience`.
-- The course POST is never retried after a timeout, to avoid duplicate courses.
+- It uses a typed HttpClient with a 20-second timeout.
+- No Garmin call is retried automatically: authorization codes are single-use, and a retried course POST could create a duplicate course.
 
 **`GarminCourseMapper`** maps a `RouteCandidate` to the Course payload:
 - name `Meander {distance} km`
