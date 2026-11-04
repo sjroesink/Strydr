@@ -77,6 +77,16 @@ public sealed class OrsResponseTests
         Assert.Equal(expected, calls);
     }
 
+    [Fact]
+    public async Task ProviderWarningCarriesTheOrsCodeForTranslation()
+    {
+        using var client = Client(Body("{}").Replace("{\"message\":null}", "{\"code\":1,\"message\":\"There may be restrictions on some roads\"}"));
+        var result = await new OrsProvider(client, new(), new()).RoundTripAsync(new(Fixtures.Start, 5, 3, 1, Activity.Running, new(true, true)), default);
+        var warning = Assert.Single(result.Warnings!, w => w.Code == "providerWarning");
+        Assert.Equal("There may be restrictions on some roads", warning.Message);
+        Assert.Equal(1, warning.Params!["orsCode"]);
+    }
+
     private static string Body(string extras) => """
         {"features":[{"geometry":{"type":"LineString","coordinates":[[5.12,52.09,null],[5.13,52.1,10],[5.14,52.09,10],[5.12,52.09,10]]},
         "properties":{"summary":{"distance":5000,"ascent":null},"warnings":[{"message":null}],"extras":EXTRAS}}]}

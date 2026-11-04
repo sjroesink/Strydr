@@ -28,7 +28,8 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
         ValidateGeometry(route);
         var warnings = new List<RouteWarning>(route.Warnings ?? []);
         if (points.Select((point, i) => Geo.DistanceKm(point, snaps[i]!.Location) * 1000).Any(d => d > options.SnapWarningM))
-            warnings.Add(new("drawnPointSnapped", $"A clicked point was moved more than {options.SnapWarningM:F0} m to a walkable path. Check the drawn section on the map."));
+            warnings.Add(new("drawnPointSnapped", $"A clicked point was moved more than {options.SnapWarningM:F0} m to a walkable path. Check the drawn section on the map.",
+                new Dictionary<string, double> { ["meters"] = Math.Round(options.SnapWarningM) }));
         route = route with { Warnings = warnings };
         var start = MakeEndpoint(points[0], snaps[0]!);
         var end = MakeEndpoint(points[^1], snaps[^1]!);
@@ -192,9 +193,11 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
                 }));
             }
             if (start.SnapDistanceM > options.SnapWarningM)
-                warnings.Add(new("startSnapped", $"Start moved {start.SnapDistanceM:F0} m to the nearest routable path."));
+                warnings.Add(new("startSnapped", $"Start moved {start.SnapDistanceM:F0} m to the nearest routable path.",
+                    new Dictionary<string, double> { ["meters"] = Math.Round(start.SnapDistanceM) }));
             if (!isLoop && end.SnapDistanceM > options.SnapWarningM)
-                warnings.Add(new("endSnapped", $"End moved {end.SnapDistanceM:F0} m to the nearest routable path."));
+                warnings.Add(new("endSnapped", $"End moved {end.SnapDistanceM:F0} m to the nearest routable path.",
+                    new Dictionary<string, double> { ["meters"] = Math.Round(end.SnapDistanceM) }));
 
             if (draft is not null && completionIsLoop && fixedDistanceKm > (flexibleDistance ? distanceRange.MaxKm : request.TargetDistanceKm) + .000001)
                 throw new RouteValidationException("The drawn section is already longer than the requested route. Increase the distance or remove a point.", minimumDistanceKm: fixedDistanceKm);
@@ -382,7 +385,8 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
         }
 
         if (selected.Count < request.CandidateCount)
-            warnings.Add(new("fewerRoutes", $"Found {selected.Count} distinct route(s); requested {request.CandidateCount}. Try moving the start or changing the distance."));
+            warnings.Add(new("fewerRoutes", $"Found {selected.Count} distinct route(s); requested {request.CandidateCount}. Try moving the start or changing the distance.",
+                new Dictionary<string, double> { ["found"] = selected.Count, ["requested"] = request.CandidateCount }));
         var expires = clock.GetUtcNow().AddMinutes(options.CacheTtlMinutes);
         var candidates = selected.Select(e =>
         {
@@ -397,7 +401,8 @@ public sealed class RouteGenerator(IRoutingProvider provider, ICandidateStore st
             if (!distanceRange.Contains(e.Result.DistanceKm))
                 allWarnings.Add(new("distanceMiss", $"Distance found: {e.Result.DistanceKm:F2} km; accepted range: {distanceRange.MinKm:F2}–{distanceRange.MaxKm:F2} km."));
             if (e.Status == CandidateStatus.Diagnostic)
-                allWarnings.Add(new("radiusExceeded", $"Diagnostic route: reaches {e.MaxDistance:F2} km from start, beyond the {request.RadiusKm:F2} km radius."));
+                allWarnings.Add(new("radiusExceeded", $"Diagnostic route: reaches {e.MaxDistance:F2} km from start, beyond the {request.RadiusKm:F2} km radius.",
+                    new Dictionary<string, double> { ["km"] = Math.Round(e.MaxDistance, 2), ["radiusKm"] = Math.Round(request.RadiusKm!.Value, 2) }));
             var candidate = new RouteCandidate(Guid.NewGuid(), expires, LineString.From(e.Result.Geometry), e.Result.DistanceKm,
                 e.Result.ElevationGainM, e.MaxDistance, e.Score, e.Status, start, end, allWarnings.DistinctBy(w => w.Code).ToArray(),
                 e.Quality.GreenScore, e.Quality.UnpavedPercent, e.Quality.SurfaceKnownPercent, WoodlandPercent: e.Woodland?.Percent);

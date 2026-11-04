@@ -18,7 +18,8 @@ public sealed record RoutePreviewRequest(Location? Start, IReadOnlyList<Location
     Activity Activity = Activity.Running, bool PreferGreen = false, bool PreferUnpaved = false);
 public sealed record RouteDraft(RouteResult Route, EndpointInfo Start, EndpointInfo LastPoint,
     IReadOnlyList<Location> RequestedPoints, Activity Activity, RoutePreferences Preferences);
-public sealed record RouteWarning(string Code, string Message);
+// Message stays English for API clients; Code and Params let the UI translate it.
+public sealed record RouteWarning(string Code, string Message, IReadOnlyDictionary<string, double>? Params = null);
 public sealed record EndpointInfo(Location Requested, Location Snapped, double SnapDistanceM);
 public sealed record LineString(double[][] Coordinates)
 {

@@ -298,4 +298,23 @@ public sealed class GenerationTests
         var route = Assert.Single(await Generator(new() { DeadlineSeconds = 1 }).GenerateAsync(Fixtures.Loop(), default));
         Assert.Contains(route.Warnings, w => w.Code == "partialSearch");
     }
+
+    [Fact]
+    public async Task SnappedStartWarningCarriesMetersForTranslation()
+    {
+        var provider = new FakeRouting { Snap = points => points.Select(p => (SnapResult?)new(Geo.Destination(p, 0, .2), 200)).ToArray() };
+        var routes = await new RouteGenerator(provider, new MemoryStore(), new(), new TestClock()).GenerateAsync(Fixtures.Loop(5), default);
+        var warning = routes[0].Warnings.Single(w => w.Code == "startSnapped");
+        Assert.Equal(200, warning.Params!["meters"], precision: 0);
+    }
+
+    [Fact]
+    public async Task FewerRoutesWarningCarriesCounts()
+    {
+        var provider = new FakeRouting { Round = (q, _) => Task.FromResult(Fixtures.Petal(0, distance: q.DistanceKm)) };
+        var routes = await new RouteGenerator(provider, new MemoryStore(), new(), new TestClock()).GenerateAsync(Fixtures.Loop(5), default);
+        var warning = routes[0].Warnings.Single(w => w.Code == "fewerRoutes");
+        Assert.Equal(routes.Count, warning.Params!["found"]);
+        Assert.Equal(3, warning.Params["requested"]);
+    }
 }

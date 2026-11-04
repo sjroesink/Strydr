@@ -90,8 +90,15 @@ public sealed class OrsProvider(HttpClient client, ActivityProfiles profiles, Or
                 a.ValueKind == JsonValueKind.Number && a.TryGetDouble(out var elevation) && double.IsFinite(elevation) && elevation >= 0)
                 ascent = elevation;
             var warnings = properties.TryGetProperty("warnings", out var w) && w.ValueKind == JsonValueKind.Array
-                ? w.EnumerateArray().Select(item => new RouteWarning("providerWarning", item.ValueKind == JsonValueKind.Object && item.TryGetProperty("message", out var m)
-                    && m.ValueKind == JsonValueKind.String ? m.GetString()! : "The provider reported a route warning.")).ToList() : [];
+                ? w.EnumerateArray().Select(item =>
+                {
+                    var message = item.ValueKind == JsonValueKind.Object && item.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String
+                        ? m.GetString()! : "The provider reported a route warning.";
+                    // ORS warning codes let the UI translate known provider texts.
+                    var code = item.ValueKind == JsonValueKind.Object && item.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.Number && c.TryGetDouble(out var number)
+                        ? new Dictionary<string, double> { ["orsCode"] = number } : null;
+                    return new RouteWarning("providerWarning", message, code);
+                }).ToList() : [];
             SegmentQuality[]? qualities;
             try { qualities = ParseQualities(properties, geometry.Length); }
             catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or FormatException)

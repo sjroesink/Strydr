@@ -44,7 +44,8 @@ public sealed class RouteEditor(ICandidateStore store, GenerationOptions options
         var outsideRadius = request.RadiusKm is { } radius && preview.MaxDistanceFromStartKm > radius + .000001;
         var status = outsideRadius ? CandidateStatus.Diagnostic : range.Contains(preview.DistanceKm) ? CandidateStatus.Qualified : CandidateStatus.BestEffort;
         var warnings = preview.Warnings.Where(w => w.Code is not ("radiusExceeded" or "distanceMiss" or "fewerRoutes" or "partialSearch")).ToList();
-        if (outsideRadius) warnings.Add(new("radiusExceeded", "The edited route exceeds your maximum radius."));
+        if (outsideRadius) warnings.Add(new("radiusExceeded", "The edited route exceeds your maximum radius.",
+            new Dictionary<string, double> { ["edited"] = 1 }));
         if (!range.Contains(preview.DistanceKm)) warnings.Add(new("distanceMiss", "The edited route is outside your target distance range."));
         var candidate = preview with { Id = Guid.NewGuid(), Status = status, Warnings = warnings.ToArray(), Score = 0 };
         store.Put(candidate);
