@@ -1,6 +1,6 @@
 # Meander
 
-A local-first running and walking route planner. Choose a start, optionally an end and radius, and a target distance. Compare up to three distinct routes on a MapLibre map and download GPX files.
+A local-first running, walking and cycling route planner. Choose a start, optionally an end and radius, and a target distance. Compare up to three distinct routes on a MapLibre map and download GPX files.
 
 ## Run locally
 
@@ -61,7 +61,7 @@ Both keys are optional replacements for hosted services. Keyless mode uses three
 
 | Hosted | Local replacement | What changes |
 | --- | --- | --- |
-| ORS routing and snapping | Self-hosted [openrouteservice](https://giscience.github.io/openrouteservice/) container (`foot-walking` only) | `Ors:BaseUrl` points to the container; no key or `Authorization` header |
+| ORS routing and snapping | Self-hosted [openrouteservice](https://giscience.github.io/openrouteservice/) container (`foot-walking` and `cycling-regular`) | `Ors:BaseUrl` points to the container; no key or `Authorization` header |
 | ORS geocoding (autocomplete) | [Photon](https://github.com/komoot/photon) container with the Netherlands index | `Geocoding:Provider=Photon`; self-hosted ORS has no geocoder |
 | MapTiler basemap | [Protomaps](https://protomaps.com/) PMTiles extract, glyphs and sprites served by the API at `/map` | `MapData:Path` on the API, `VITE_PMTILES_URL` in the frontend |
 | Public Overpass (woodland lookup, keyless but often busy) | [Overpass API](https://github.com/wiktorn/Overpass-API) container with a Netherlands import | `Woodland:Url` points to the container |
@@ -118,7 +118,8 @@ Backend defaults live in `src/Meander.Api/appsettings.json`; ignored `appsetting
 | `Ors:DirectionsPerMinute` | 35 | Sliding-window outbound directions budget, including retries |
 | `Ors:SnapsPerMinute` | 90 | Separate snapping budget |
 | `Ors:GeocodingPerMinute` | 90 | Separate autocomplete budget |
-| `Generation:MaxDistanceKm` | 60 | Accepted target range starts at 0.5 km; configured maximum may not exceed 100 km |
+| `Generation:MaxDistanceKm` | 60 | Running and walking maximum; accepted target range starts at 0.5 km; configured maximum may not exceed 100 km |
+| `Generation:MaxCyclingDistanceKm` | 100 | Cycling maximum; same 0.5–100 km bounds |
 | `Generation:SnapRadiusM` | 1000 | Endpoint snap search radius |
 | `Generation:SnapWarningM` | 200 | Warn when the start or end moves farther than this |
 | `Generation:DistanceTolerance` | 0.05 | Relative distance tolerance |
@@ -152,7 +153,8 @@ Frontend configuration (`frontend/.env.local`, restart Vite after edits):
 | `VITE_MAP_ASSETS_URL` | Glyphs and sprites for the local basemap; defaults to `/map/assets` |
 | `VITE_MAP_STYLE_URL` | Optional OSM-based MapLibre style URL instead of MapTiler's quiet Base v4 style |
 | `VITE_MAP_STYLE_DARK_URL` | Optional dark counterpart for a custom map style; default MapTiler maps switch to Base v4 Dark automatically |
-| `VITE_MAX_DISTANCE_KM` | Slider maximum; default 60, keep aligned with the backend maximum |
+| `VITE_MAX_DISTANCE_KM` | Slider maximum for running and walking; default 60, keep aligned with the backend maximum |
+| `VITE_MAX_CYCLING_DISTANCE_KM` | Slider maximum for cycling; default 100, keep aligned with `Generation:MaxCyclingDistanceKm` |
 | `API_PROXY_TARGET` | Development API address; defaults to `http://127.0.0.1:5080` |
 
 Appearance follows the system setting by default. The header's system/sun/moon buttons allow an override, which is stored in the browser. Dark mode uses charcoal surfaces, near-white text and orange accents; light mode retains the green palette. Basemap changes retain the current camera, route overlays, selection and markers. Activity and scenery controls use inline SVG icons; decorative slogans and empty-state filler have been removed.
@@ -182,7 +184,7 @@ The planner is available in Dutch and English. It follows the browser language (
 }
 ```
 
-`end` and `radiusKm` are optional. Identical endpoint coordinates make a loop. Activities are `running` and `walking`; both currently use ORS `foot-walking`. `candidateCount` accepts 1–3 and defaults to 3. Request coordinates use named properties; GeoJSON output coordinates use **longitude, latitude, optional elevation**.
+`end` and `radiusKm` are optional. Identical endpoint coordinates make a loop. Activities are `running`, `walking` and `cycling`. Running and walking use ORS `foot-walking`; cycling uses `cycling-regular`. ORS offers the green weighting only on foot profiles, so cycling routes measure nature with the woodland lookup alone, anchored on paths open to bikes. `candidateCount` accepts 1–3 and defaults to 3. Request coordinates use named properties; GeoJSON output coordinates use **longitude, latitude, optional elevation**.
 
 The nonempty array response contains `id`, `searchId`, `expiresAt` (null for saved routes), GeoJSON `geometry`, `distanceKm`, nullable `elevationGainM`, `maxDistanceFromStartKm`, `score` (lower is better), endpoint snap information, `status`, and `{ code, message }` warnings. Optional quality fields are `woodlandPercent` (approximate share inside mapped nature: forest, heath, sand and dunes, nature reserves and national parks), `greenScore` (legacy ORS index, not displayed), `unpavedPercent` (confirmed share of total route length), and `surfaceKnownPercent`.
 
@@ -214,7 +216,7 @@ Drag a numbered marker to move that point; the start/end markers can also be dra
 
 ### Edit a suggested route
 
-Choose **Edit route** on a result card. The editor copies the exact stored geometry and introduces up to 19 intermediate control points, spaced approximately every 600 m (with wider spacing for longer routes). Opening an editor does not call ORS or change the found route. Drag points to reshape it. Click a numbered marker to reveal **Remove point** and **Insert after**. Clicking the map otherwise inserts a point into the nearest part of the actual routed geometry. Every subsequent change reconnects the controls through the walking network, so paths between controls can change. Loops keep their return to the start; point-to-point routes keep a separate end marker.
+Choose **Edit route** on a result card. The editor copies the exact stored geometry and introduces up to 19 intermediate control points, spaced approximately every 600 m (with wider spacing for longer routes). Opening an editor does not call ORS or change the found route. Drag points to reshape it. Click a numbered marker to reveal **Remove point** and **Insert after**. Clicking the map otherwise inserts a point into the nearest part of the actual routed geometry. Every subsequent change reconnects the controls through the path network of the chosen activity, so paths between controls can change. Loops keep their return to the start; point-to-point routes keep a separate end marker.
 
 Use **Save changes** or **Save edited route** to save the exact current preview as a new search URL, without running another candidate search. The original search URL stays available, and **Cancel editing** restores it. **Download edited GPX** exports the current preview. Unsaved editor drafts have the normal 30-minute TTL; saved edits and their control points persist in SQLite and restore without routing calls. Undo restores a cached earlier preview when possible, including the exact initial found geometry.
 

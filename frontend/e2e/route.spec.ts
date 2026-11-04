@@ -229,6 +229,23 @@ test('choose a start, generate and inspect routes, and export GPX', async ({ pag
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test('plan a long bike ride', async ({ page }) => {
+  await page.route('https://fonts.googleapis.com/**', route => route.abort());
+  await page.goto('/');
+  await page.getByRole('radio', { name: 'Cycle' }).check();
+  await chooseUtrecht(page);
+  await page.getByRole('button', { name: /Next: distance/ }).click();
+  await page.getByRole('button', { name: '80 km' }).click();
+  await page.getByRole('button', { name: /Next: preferences/ }).click();
+  const generated = page.waitForResponse(response => response.url().includes('/api/routes/generate') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Find my routes' }).click();
+  const response = await generated;
+  expect(response.status()).toBe(200);
+  expect(response.request().postDataJSON()).toMatchObject({ activity: 'cycling', targetDistanceKm: 80 });
+  await expect(page.getByRole('button', { name: /Route 1/ })).toBeVisible();
+  await expect(page.getByText(/Cycle from/)).toBeVisible();
+});
+
 test('connect Garmin and send the chosen route', async ({ page, request }) => {
   // The fake server's counter spans both projects, so compare against a baseline.
   const courseCount = async () => (await (await request.get('http://127.0.0.1:5091/garmin/courses')).json()).count as number;

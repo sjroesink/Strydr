@@ -306,6 +306,8 @@ public sealed class GarminTests
         Assert.Equal("Meander route: https://meander.test/routes/s?route=r",
             GarminCourseMapper.Map(Fixtures.Candidate(), Activity.Walking, new("https://meander.test/routes/s?route=r")).Description);
         Assert.Equal("WALKING", course.ActivityType);
+        Assert.Equal("RUNNING", GarminCourseMapper.Map(Fixtures.Candidate(), Activity.Running, null).ActivityType);
+        Assert.Equal("ROAD_CYCLING", GarminCourseMapper.Map(Fixtures.Candidate(), Activity.Cycling, null).ActivityType);
         Assert.Equal("WGS84", course.CoordinateSystem);
         Assert.Equal(2000, course.Distance);
         Assert.Equal(12.5, course.ElevationGain);

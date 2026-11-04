@@ -12,7 +12,7 @@ test('follows system appearance, persists overrides and omits decorative text', 
   await expect(page.locator('.brand')).toHaveCSS('color', 'rgb(236, 155, 99)');
   await expect(page.getByRole('button', { name: 'System theme' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('radio', { name: 'Run' })).toBeChecked();
-  await expect(page.locator('.segmented-control svg')).toHaveCount(2);
+  await expect(page.locator('.segmented-control svg')).toHaveCount(3);
   await expect(page.getByText(/Made for moving|TAKE THE SCENIC WAY|A little further|Good routes start with/)).toHaveCount(0);
   await expect(page.getByRole('checkbox', { name: /Avoid out-and-back/ })).toHaveCount(0);
   await expect(page.locator('.maplibregl-canvas')).toBeVisible();

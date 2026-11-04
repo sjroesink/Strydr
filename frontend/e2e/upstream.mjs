@@ -59,6 +59,11 @@ const server = createServer(async (req, res) => {
   try {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString());
+    // Only the profiles a self-hosted Meander ORS builds; anything else is a wiring mistake.
+    const profile = path.split('/')[3];
+    if ((path.startsWith('/v2/snap/') || path.startsWith('/v2/directions/')) && !['foot-walking', 'cycling-regular'].includes(profile)) {
+      res.statusCode = 404; res.end('{"error":"unknown profile"}'); return;
+    }
     if (path.startsWith('/v2/snap/')) {
       res.end(JSON.stringify({ locations: body.locations.map(location => ({ location, snapped_distance: 0 })) })); return;
     }

@@ -41,7 +41,7 @@ public sealed class WoodlandTests
               {"type":"way","role":"inner","geometry":[{"lat":0.5,"lon":0.5},{"lat":1.5,"lon":0.5},{"lat":1.5,"lon":1.5},{"lat":0.5,"lon":1.5},{"lat":0.5,"lon":0.5}]}
             ]}]}
             """);
-        var map = OverpassWoodlandProvider.Parse(new(0, 0), json.RootElement);
+        var map = OverpassWoodlandProvider.Parse(new(0, 0), json.RootElement).OnFoot;
         Assert.Equal(1, map.PolygonCount);
         Assert.True(map.Contains(new(.2, .2)));
         Assert.False(map.Contains(new(1, 1)));
@@ -64,10 +64,35 @@ public sealed class WoodlandTests
               {"type":"way","tags":{"natural":"grassland"},"geometry":{{Square(12)}}}
             ]}
             """);
-        var map = OverpassWoodlandProvider.Parse(new(0, 0), json.RootElement);
+        var map = OverpassWoodlandProvider.Parse(new(0, 0), json.RootElement).OnFoot;
         Assert.Equal(4, map.PolygonCount);
         foreach (var lat in new[] { .5, 2.5, 4.5, 6.5 }) Assert.True(map.Contains(new(lat, .5)));
         foreach (var lat in new[] { 8.5, 10.5, 12.5 }) Assert.False(map.Contains(new(lat, .5)));
+    }
+
+    [Fact]
+    public void BikeAnchorsOnlyUsePathsWhereCyclingIsAllowed()
+    {
+        static string Way(double lat, string tags) =>
+            $$"""{"type":"way","tags":{{{tags}}},"geometry":[{"lat":{{lat}},"lon":0.5}]}""";
+        using var json = JsonDocument.Parse($$"""
+            {"elements":[
+              {"type":"way","tags":{"natural":"wood"},"geometry":[{"lat":0,"lon":0},{"lat":0,"lon":1},{"lat":1,"lon":1},{"lat":1,"lon":0},{"lat":0,"lon":0}]},
+              {{Way(.1, "\"highway\":\"cycleway\"")}},
+              {{Way(.2, "\"highway\":\"track\"")}},
+              {{Way(.3, "\"highway\":\"path\",\"bicycle\":\"designated\"")}},
+              {{Way(.4, "\"highway\":\"footway\"")}},
+              {{Way(.5, "\"highway\":\"path\",\"bicycle\":\"no\"")}},
+              {{Way(.6, "\"highway\":\"cycleway\",\"foot\":\"no\"")}},
+              {{Way(.7, "\"highway\":\"track\",\"access\":\"private\"")}}
+            ]}
+            """);
+        var area = OverpassWoodlandProvider.Parse(new(0, 0), json.RootElement);
+        Assert.Equal(5, area.OnFoot.PathCount);
+        Assert.Equal(4, area.ByBike.PathCount);
+        Assert.Same(area.ByBike, area.For(Activity.Cycling));
+        Assert.Same(area.OnFoot, area.For(Activity.Walking));
+        Assert.Equal(1, area.ByBike.PolygonCount);
     }
 
     [Fact]
@@ -206,6 +231,15 @@ public sealed class WoodlandTests
     }
 
     [Fact]
+    public async Task RidesAskForTheWoodlandAnchorsOfTheirActivity()
+    {
+        var source = new FixedWoodland(null);
+        await new RouteGenerator(new FakeRouting(), new MemoryStore(), new(), new TestClock(), source)
+            .GenerateAsync(Fixtures.Loop() with { Activity = Activity.Cycling, PreferGreen = true }, default);
+        Assert.Equal(Activity.Cycling, source.LastActivity);
+    }
+
+    [Fact]
     public async Task UnavailableWoodlandReturnsUsableRoutesWithAnHonestWarning()
     {
         var routes = await new RouteGenerator(new FakeRouting(), new MemoryStore(), new(), new TestClock(), new FixedWoodland(null))
@@ -226,9 +260,12 @@ public sealed class WoodlandTests
         var handler = new WoodlandHandler((HttpStatusCode)status);
         using var client = new HttpClient(handler) { MaxResponseContentBufferSize = 8 * 1024 * 1024 };
         using var source = new OverpassWoodlandProvider(new Clients(client), new(), new TestClock());
-        var results = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => source.FindAsync(Fixtures.Start, 3, default)));
+        var results = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => source.FindAsync(Fixtures.Start, 3, Activity.Running, default)));
+        // A ride from the same spot reuses the lookup; only the anchor paths differ.
+        Assert.Equal(status == 200, await source.FindAsync(Fixtures.Start, 3, Activity.Cycling, default) is not null);
         Assert.Equal(1, handler.Calls);
         Assert.All(results, map => Assert.Equal(status == 200, map is not null));
+        Assert.DoesNotContain("[foot", handler.Body!);
         Assert.DoesNotContain("Authorization", handler.Headers!);
         Assert.Contains("wood", handler.Body!);
         Assert.Contains("landuse=forest", handler.Body!);

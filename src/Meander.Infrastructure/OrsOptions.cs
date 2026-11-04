@@ -46,8 +46,10 @@ public sealed class ActivityProfiles
     // New activities belong in the domain enum and this provider-specific registry.
     private readonly IReadOnlyDictionary<Activity, string> profiles = new Dictionary<Activity, string>
     {
-        [Activity.Running] = "foot-walking", [Activity.Walking] = "foot-walking"
+        [Activity.Running] = "foot-walking", [Activity.Walking] = "foot-walking", [Activity.Cycling] = "cycling-regular"
     };
     public string For(Activity activity) => profiles.TryGetValue(activity, out var profile)
         ? profile : throw new RouteValidationException("activityUnsupported", "This activity is not supported by the configured provider.");
+    // ORS offers the green weighting and extra info on foot profiles only.
+    public bool SupportsGreen(Activity activity) => For(activity).StartsWith("foot-", StringComparison.Ordinal);
 }

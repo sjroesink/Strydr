@@ -6,20 +6,21 @@ using Activity = Meander.Core.Activity;
 namespace Meander.Infrastructure;
 
 // A FIT course as Garmin devices expect it: FileId, Course, Lap, timer start, one Record per
-// point, timer stop. Courses need timestamps, so points get a synthetic 6 min/km pace.
+// point, timer stop. Courses need timestamps, so points get a synthetic pace:
+// 6 min/km on foot, 20 km/h by bike.
 public static class FitCourseWriter
 {
     private const double Semicircles = 2147483648d / 180d;
-    private const double SecondsPerMetre = .36;
 
     public static byte[] Write(RouteCandidate route, Activity activity, DateTimeOffset createdAt)
     {
+        var secondsPerMetre = activity == Activity.Cycling ? .18 : .36;
         var points = route.Geometry.Coordinates;
         var distances = new double[points.Length];
         for (var i = 1; i < points.Length; i++)
             distances[i] = distances[i - 1] + Geo.DistanceKm(At(points[i - 1]), At(points[i])) * 1000;
         var start = createdAt.UtcDateTime;
-        Dynastream.Fit.DateTime Time(double metres) => new(start.AddSeconds(Math.Round(metres * SecondsPerMetre)));
+        Dynastream.Fit.DateTime Time(double metres) => new(start.AddSeconds(Math.Round(metres * secondsPerMetre)));
         var total = distances.Length == 0 ? 0 : distances[^1];
 
         using var stream = new MemoryStream();
@@ -36,7 +37,12 @@ public static class FitCourseWriter
 
         var course = new CourseMesg();
         course.SetName($"Meander {route.DistanceKm.ToString("F1", CultureInfo.InvariantCulture)} km");
-        course.SetSport(activity == Activity.Walking ? Sport.Walking : Sport.Running);
+        course.SetSport(activity switch
+        {
+            Activity.Walking => Sport.Walking,
+            Activity.Cycling => Sport.Cycling,
+            _ => Sport.Running
+        });
         encoder.Write(course);
 
         var lap = new LapMesg();
@@ -49,8 +55,8 @@ public static class FitCourseWriter
             lap.SetEndPositionLat(Lat(points[^1])); lap.SetEndPositionLong(Lon(points[^1]));
         }
         lap.SetTotalDistance((float)total);
-        lap.SetTotalElapsedTime((float)(total * SecondsPerMetre));
-        lap.SetTotalTimerTime((float)(total * SecondsPerMetre));
+        lap.SetTotalElapsedTime((float)(total * secondsPerMetre));
+        lap.SetTotalTimerTime((float)(total * secondsPerMetre));
         encoder.Write(lap);
 
         encoder.Write(TimerEvent(Time(0), EventType.Start));

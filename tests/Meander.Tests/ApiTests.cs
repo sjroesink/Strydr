@@ -333,6 +333,47 @@ public sealed class ApiTests
     }
 
     [Fact]
+    public async Task CyclingRoutesUseTheCyclingProfileWithoutTheFootOnlyGreenWeighting()
+    {
+        var upstream = new StubOrs();
+        await using var app = new ApiFactory(upstream);
+        using var client = app.CreateClient();
+        var response = await client.PostAsJsonAsync("/api/routes/generate", new {
+            start = new { latitude = 52.09, longitude = 5.12 }, targetDistanceKm = 80, activity = "cycling", preferGreen = true, preferUnpaved = true
+        });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.All(upstream.Requests, r => Assert.Contains("/cycling-regular/", r.Path));
+        Assert.All(upstream.Requests.Where(r => r.Path.Contains("/directions/")), r =>
+        {
+            var body = r.Body!.Value;
+            Assert.False(body.TryGetProperty("options", out var options) && options.TryGetProperty("profile_params", out _));
+            Assert.Equal(new[] { "surface" }, body.GetProperty("extra_info").EnumerateArray().Select(v => v.GetString()));
+        });
+    }
+
+    [Fact]
+    public async Task FootRoutesStillAskForGreenWhenOrsSupportsIt()
+    {
+        var upstream = new StubOrs();
+        await using var app = new ApiFactory(upstream);
+        using var client = app.CreateClient();
+        var response = await client.PostAsJsonAsync("/api/routes/generate", new {
+            start = new { latitude = 52.09, longitude = 5.12 }, targetDistanceKm = 5, activity = "walking", preferGreen = true
+        });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(upstream.Requests, r => r.Path.Contains("/directions/foot-walking/") &&
+            r.Body!.Value.GetProperty("options").TryGetProperty("profile_params", out _));
+    }
+
+    [Fact]
+    public void CyclingMaximumIsCheckedAtStartup()
+    {
+        var ors = new OrsOptions { BaseUrl = "http://ors:8082/ors/" };
+        Assert.Throws<InvalidOperationException>(() => ConfigurationChecks.Validate(ors, new GenerationOptions { MaxCyclingDistanceKm = 150 }));
+        Assert.Throws<InvalidOperationException>(() => ConfigurationChecks.Validate(ors, new GenerationOptions { MaxCyclingDistanceKm = .2 }));
+    }
+
+    [Fact]
     public async Task PhotonGeocoderBuildsLabelsFromAddressParts()
     {
         var upstream = new StubOrs();

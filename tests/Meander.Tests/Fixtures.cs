@@ -31,8 +31,9 @@ internal sealed class TestClock : TimeProvider
 internal sealed class FixedWoodland(WoodlandMap? map) : IWoodlandProvider
 {
     public int Calls;
-    public Task<WoodlandMap?> FindAsync(Location center, double radiusKm, CancellationToken cancellationToken)
-    { Calls++; return Task.FromResult(map); }
+    public Activity? LastActivity;
+    public Task<WoodlandMap?> FindAsync(Location center, double radiusKm, Activity activity, CancellationToken cancellationToken)
+    { Calls++; LastActivity = activity; return Task.FromResult(map); }
 }
 internal sealed class FakeRouting : IRoutingProvider
 {

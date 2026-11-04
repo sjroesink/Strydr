@@ -56,6 +56,18 @@ public sealed class FitCourseTests
     }
 
     [Fact]
+    public void CyclingRoutesUseTheCyclingSportAndARidingPace()
+    {
+        var (_, course, lap, records) = Decode(FitCourseWriter.Write(Fixtures.Candidate(), Activity.Cycling, DateTimeOffset.UtcNow));
+        Assert.Equal(Sport.Cycling, course!.GetSport());
+        // 20 km/h: 0.18 s per metre, against 0.36 on foot.
+        Assert.Equal(lap!.GetTotalDistance()!.Value * .18, lap.GetTotalTimerTime()!.Value, 1.0);
+        var (_, _, footLap, _) = Decode(FitCourseWriter.Write(Fixtures.Candidate(), Activity.Running, DateTimeOffset.UtcNow));
+        Assert.Equal(footLap!.GetTotalDistance()!.Value * .36, footLap.GetTotalTimerTime()!.Value, 1.0);
+        Assert.NotEmpty(records);
+    }
+
+    [Fact]
     public async Task FitEndpointServesGeneratedAndSavedRoutes()
     {
         await using var app = new ApiFactory(new());

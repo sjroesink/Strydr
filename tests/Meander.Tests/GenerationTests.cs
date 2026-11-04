@@ -150,6 +150,19 @@ public sealed class GenerationTests
     }
 
     [Fact]
+    public void CyclingAllowsLongerRoutesThanRunningAndWalking()
+    {
+        var options = new GenerationOptions();
+        var ride = Fixtures.Loop(80) with { Activity = Activity.Cycling };
+        Assert.Empty(RequestValidation.Check(ride, options));
+        Assert.Contains("targetDistanceKm", RequestValidation.Check(ride with { Activity = Activity.Running }, options).Keys);
+        Assert.Contains("targetDistanceKm", RequestValidation.Check(ride with { Activity = Activity.Walking }, options).Keys);
+        Assert.Contains("targetDistanceKm", RequestValidation.Check(ride with { TargetDistanceKm = 101 }, options).Keys);
+        Assert.Equal(100, RouteDistanceRange.For(ride with { TargetDistanceKm = 98, DistanceFlexibilityPercent = 10 }, options).MaxKm);
+        Assert.Equal(60, RouteDistanceRange.For(Fixtures.Loop(58) with { DistanceFlexibilityPercent = 10 }, options).MaxKm);
+    }
+
+    [Fact]
     public async Task ExplicitSameEndUsesRoundTrips()
     {
         await Generator().GenerateAsync(Fixtures.Loop() with { End = Fixtures.Start }, default);

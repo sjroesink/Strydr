@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
 
-export type IconName = 'run' | 'walk' | 'green' | 'unpaved' | 'system' | 'sun' | 'moon' | 'download' | 'edit'
+export type IconName = 'run' | 'walk' | 'bike' | 'green' | 'unpaved' | 'system' | 'sun' | 'moon' | 'download' | 'edit'
   | 'back' | 'next' | 'close' | 'plus' | 'minus' | 'undo' | 'trash' | 'fit' | 'pin' | 'locate' | 'chevron' | 'check' | 'move' | 'link' | 'send' | 'external';
 const shapes: Record<IconName, ReactNode> = {
   run: <><circle cx="16" cy="4" r="2" /><path d="m12 8 4 3 4-1M12 8l-3 5 5 3-1 5M9 13l-4 1-2-3M12 8 8 7 5 10" /></>,
   walk: <><circle cx="14" cy="4" r="2" /><path d="m13 8-2 6 5 3 1 5M11 14l-3 8M13 8l4 4 3 1M13 8l-4 3-2 3" /></>,
+  bike: <><circle cx="5.5" cy="17" r="3.5" /><circle cx="18.5" cy="17" r="3.5" /><path d="M5.5 17 9 9h7l2.5 8M9 9l3.5 8h-7M16 9l-1-3h-2.5M7.5 6H10" /></>,
   green: <><path d="M12 3 6 10h3l-5 6h6v5h4v-5h6l-5-6h3L12 3Z" /><path d="M7 21h10" /></>,
   unpaved: <><path d="M10 3c-4 5 5 7 3 11-1 3-5 4-4 7M16 3c-4 5 5 7 3 11-1 3-5 4-4 7" /><path d="M5 5h.01M7 10h.01M4 16h.01M20 5h.01M22 17h.01M5 21h.01" strokeWidth="3" /></>,
   system: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></>,
