@@ -325,7 +325,7 @@ function Planner() {
       goTo('distance');
     } else if (view === 'distance') {
       const km = Number(distance);
-      if (!Number.isFinite(km) || km < .5 || km > MAX_DISTANCE) { setError([{ key: 'error.distanceRange', params: { min: number(.5), max: number(MAX_DISTANCE) } }]); return; }
+      if (!Number.isFinite(km) || km < .5 || km > MAX_DISTANCE) { setError([{ key: 'error.distanceRange', params: { min: .5, max: MAX_DISTANCE } }]); return; }
       if (hasRadius && (!Number.isFinite(Number(radius)) || Number(radius) <= 0)) { setError([{ key: 'error.radius' }]); return; }
       goTo('preferences');
     }
@@ -450,7 +450,7 @@ function Planner() {
     if (drawnPoints.length > 0 && (!draft || draftPhase !== 'ready')) { setError([{ key: 'error.waitForDrawing' }]); return; }
     const km = Number(distance);
     const radiusKm = hasRadius ? Number(radius) : null;
-    if (!Number.isFinite(km) || km < .5 || km > MAX_DISTANCE) { setError([{ key: 'error.distanceRange', params: { min: number(.5), max: number(MAX_DISTANCE) } }]); return; }
+    if (!Number.isFinite(km) || km < .5 || km > MAX_DISTANCE) { setError([{ key: 'error.distanceRange', params: { min: .5, max: MAX_DISTANCE } }]); return; }
     if (radiusKm !== null && (!Number.isFinite(radiusKm) || radiusKm <= 0)) { setError([{ key: 'error.radius' }]); return; }
     invalidate(); setMode('browse');
     const current = revision.current;
@@ -723,7 +723,7 @@ function Planner() {
         <button type="button" aria-label={t('summary.changeStart')} onClick={() => goTo('start')}>
           <Icon name="check" /><span><small>{t('step.start')}</small>{t('summary.start', { activity: t(activity === 'running' ? 'activity.running' : 'activity.walking'), place: start?.label ?? '…' })}</span><span className="summary-change">{t('summary.change')}</span></button>
         <button type="button" aria-label={t('summary.changeDistance')} onClick={() => goTo('distance')}>
-          <Icon name="check" /><span><small>{t('step.distance')}</small>{t('drawing.km', { km: number(km || 0) })}{hasFlexibleDistance ? t('summary.margin', { margin: distanceMargin }) : ''}{hasRadius ? t('summary.within', { km: radius }) : ''}</span><span className="summary-change">{t('summary.change')}</span></button>
+          <Icon name="check" /><span><small>{t('step.distance')}</small>{t('drawing.km', { km: number(km || 0) })}{hasFlexibleDistance ? t('summary.margin', { margin: distanceMargin }) : ''}{hasRadius ? t('summary.within', { km: number(Number(radius)) }) : ''}</span><span className="summary-change">{t('summary.change')}</span></button>
         <button type="button" aria-label={t('summary.changePreferences')} onClick={() => goTo('preferences')}>
           <Icon name="check" /><span><small>{t('step.preferences')}</small>{preferenceSummary}</span><span className="summary-change">{t('summary.change')}</span></button>
       </div>
@@ -787,7 +787,7 @@ function Planner() {
   const brand = <a className="brand" href="/" aria-label={t('brand.home')}><PathIcon small /><span>meander<span className="brand-period">.</span></span></a>;
   const languagePicker = <div className="language-picker" role="group" aria-label={t('language.group')}>
     {(['nl', 'en'] as const).map(value => <button type="button" key={value} lang={value}
-      aria-label={t(`language.${value}`)} aria-pressed={language === value} onClick={() => setLanguage(value)}>
+      title={t(`language.${value}`)} aria-pressed={language === value} onClick={() => setLanguage(value)}>
       {value.toUpperCase()}</button>)}
   </div>;
   const themePicker = <div className="theme-picker" role="group" aria-label={t('theme.group')}>

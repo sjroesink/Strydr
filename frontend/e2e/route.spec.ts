@@ -20,8 +20,8 @@ async function clickFreeMap(page: Page, fx: number, fy: number) {
   await page.mouse.click(area.left + (area.right - area.left) * fx, area.top + (area.bottom - area.top) * fy);
 }
 
-async function chooseUtrecht(page: Page) {
-  await page.getByRole('combobox', { name: 'Start location' }).fill('Utrecht');
+async function chooseUtrecht(page: Page, label = 'Start location') {
+  await page.getByRole('combobox', { name: label }).fill('Utrecht');
   await page.getByRole('option', { name: 'Utrecht, Netherlands' }).click();
 }
 
@@ -234,7 +234,15 @@ test.describe('Dutch browser', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Waar begin je?' })).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('lang', 'nl');
-    await page.getByRole('button', { name: 'English' }).click();
-    await expect(page.getByRole('heading', { name: 'Where do you start?' })).toBeVisible();
+    await chooseUtrecht(page, 'Startlocatie');
+    await page.getByRole('button', { name: /Volgende: afstand/ }).click();
+    await page.getByRole('button', { name: /Volgende: voorkeuren/ }).click();
+    await page.getByRole('checkbox', { name: /Groene omgeving/ }).check();
+    await page.getByRole('button', { name: 'Vind mijn routes' }).click();
+    await expect(page.getByText(/% natuur/).first()).toBeVisible();
+    await page.getByRole('button', { name: 'EN', exact: true }).click();
+    await expect(page.getByText(/% nature/).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'EN', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   });
 });

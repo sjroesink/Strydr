@@ -157,7 +157,7 @@ Provider limits vary by account. Check your dashboard and [ORS restrictions](htt
 
 ### Languages
 
-The planner is available in Dutch and English. It follows the browser language (Dutch for `nl-*`, English otherwise) until you pick **NL** or **EN** in the top bar; that choice is remembered in the browser. Map labels and place search follow the same language. The API keeps English `message`/`detail` texts and adds stable `code` values (and numeric `params` on warnings and some errors) that the frontend translates.
+The planner is available in Dutch and English. It follows the browser language (Dutch for `nl-*`, English otherwise) until you pick **NL** or **EN** in the top bar; that choice is remembered in the browser. Place search follows the same language, and so do the labels of the self-hosted PMTiles/Protomaps basemap; MapTiler or custom `VITE_MAP_STYLE_URL` styles keep their own labels. The API keeps English `message`/`detail` texts and adds stable `code` values (and numeric `params` on warnings and some errors) that the frontend translates.
 
 ## API
 

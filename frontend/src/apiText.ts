@@ -38,7 +38,10 @@ export function warningMessage(warning: RouteWarning, format: Format): Message {
 export function problemMessages(error: ApiError, format: Format): Message[] {
   const { problem } = error;
   const key = `errors.${problem.code}`;
-  const messages: Message[] = problem.code && known(key) ? [{ key }] : [{ text: error.message }];
+  const messages: Message[] = problem.code === 'apiUnreachable' ? [{ key: 'error.unreachable' }]
+    : problem.code && known(key) ? [{ key }]
+    : !problem.detail && !problem.title ? [{ key: 'error.request' }]
+    : [{ text: error.message }];
   if (problem.code === 'noUsableRoute' && problem.params?.avoidBacktracking) messages.push({ key: 'errors.noUsableRouteBacktracking' });
   if (problem.minimumDistanceKm !== undefined) messages.push({ key: 'error.minimumDistance', params: { km: format(problem.minimumDistanceKm, 2) } });
   if (error.retryAfter) messages.push({ key: 'error.retryAfter', params: { seconds: error.retryAfter } });

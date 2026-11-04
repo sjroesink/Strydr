@@ -562,7 +562,9 @@ it('follows a Dutch browser and switches to English with the toggle', async () =
     render(<App />);
     expect(await screen.findByRole('heading', { name: 'Waar begin je?' })).toBeInTheDocument();
     expect(document.documentElement.lang).toBe('nl');
-    fireEvent.click(screen.getByRole('button', { name: 'English' }));
+    expect(screen.getByRole('button', { name: 'NL' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+    expect(screen.getByRole('button', { name: 'EN' })).toHaveAttribute('aria-pressed', 'true');
     expect(await screen.findByRole('heading', { name: 'Where do you start?' })).toBeInTheDocument();
     expect(localStorage.getItem('meander.language')).toBe('en');
   } finally { languages.mockRestore(); }

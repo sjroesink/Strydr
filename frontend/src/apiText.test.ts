@@ -30,3 +30,8 @@ test('maps other failures to a fallback or their own message', () => {
   expect(failureMessages(new TypeError('Failed to fetch'), 'error.openSaved', format)).toEqual([{ key: 'error.openSaved' }]);
   expect(failureMessages(new MessageError({ key: 'error.savedNoRoutes' }), 'error.openSaved', format)).toEqual([{ key: 'error.savedNoRoutes' }]);
 });
+
+test('translates an unreachable API and a problem without any text', () => {
+  expect(problemMessages(new ApiError({ code: 'apiUnreachable', detail: 'Could not reach Meander.' }), format)).toEqual([{ key: 'error.unreachable' }]);
+  expect(problemMessages(new ApiError({ status: 500 }), format)).toEqual([{ key: 'error.request' }]);
+});
