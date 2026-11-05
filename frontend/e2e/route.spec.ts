@@ -204,9 +204,17 @@ test('choose a start, generate and inspect routes, and export GPX', async ({ pag
   const insertedPending = page.waitForResponse(response => new URL(response.url()).pathname === '/api/routes/preview' && response.request().method() === 'POST');
   await page.locator('.map-ghost-marker').nth(1).click();
   const insertedResponse = await insertedPending;
-  const editedPreview = await insertedResponse.json();
-  expect(insertedResponse.request().postDataJSON().points).toHaveLength(session.points.length + 1);
+  const insertedPoints = insertedResponse.request().postDataJSON().points;
+  expect(insertedPoints).toHaveLength(session.points.length + 1);
   await expect(page.locator('.map-via-marker')).toHaveCount(session.points.length);
+  // Reversing a loop keeps its start and passes the same points the other way round.
+  const reversedPending = page.waitForResponse(response => new URL(response.url()).pathname === '/api/routes/preview' && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Reverse' }).click();
+  const reversedResponse = await reversedPending;
+  const editedPreview = await reversedResponse.json();
+  expect(reversedResponse.request().postDataJSON().points).toEqual([...insertedPoints.slice(0, -1).reverse(), insertedPoints.at(-1)]);
+  await page.waitForTimeout(750);
+  await page.screenshot({ path: testInfo.outputPath('meander-reversed.png'), fullPage: true });
   const saving = page.waitForResponse(response => new URL(response.url()).pathname === '/api/routes/save');
   await page.getByRole('button', { name: 'Save changes' }).click();
   const savedResponse = await saving;

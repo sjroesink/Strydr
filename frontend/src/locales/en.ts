@@ -132,6 +132,8 @@ export const en = {
   'edit.remove': 'Remove',
   'edit.removePoint': 'Remove point',
   'edit.fit': 'Fit',
+  'edit.reverse': 'Reverse',
+  'edit.reverseTitle': 'Reverse the direction of the route',
   'error.chooseStart': 'Choose a start location from search or the map.',
   'error.distanceRange': 'Choose a distance between {min} and {max} km.',
   'error.radius': 'Choose a positive radius.',

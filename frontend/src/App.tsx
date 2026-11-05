@@ -433,6 +433,17 @@ function Planner() {
     rememberDrawing(); invalidate(); setDraft(null); setDrawnPoints(points => points.filter((_, i) => i !== index));
     if (completeDrawing) setIsEditingRoute(true);
   }
+  // The same course the other way round: points in reverse order and, for a
+  // point-to-point route, start and finish swapped. A loop keeps its start.
+  function reverseRoute() {
+    const swapEnds = hasEnd && !!end;
+    if (!start || markerDragging.current || restoring || drawnPoints.length < 2 && !swapEnds) return;
+    rememberDrawing(); invalidate(); setDraft(null);
+    setDrawnPoints(points => [...points].reverse());
+    setSelectedPoint(index => index === null ? null : drawnPoints.length - 1 - index);
+    if (swapEnds) { setStart(end); setStartText(endText); setEnd(start); setEndText(startText); }
+    if (completeDrawing) setIsEditingRoute(true);
+  }
   function clearDrawing() {
     rememberDrawing(); invalidate(); setDraft(null); setLastGoodDraft(null); setDrawnPoints([]); setCompleteDrawing(false); setIsEditingRoute(false); setMode('browse');
   }
@@ -887,6 +898,8 @@ function Planner() {
           <button type="button" disabled={selectedPoint === null || !drawnPoints[selectedPoint]} aria-keyshortcuts="Delete"
             aria-label={selectedPoint !== null && drawnPoints[selectedPoint] ? t('drawing.removePoint', { n: selectedPoint + 1 }) : t('edit.removePoint')}
             onClick={() => selectedPoint !== null && removePoint(selectedPoint)}><Icon name="trash" /><span>{t('edit.remove')}</span></button>
+          <button type="button" disabled={drawnPoints.length < 2 && !(hasEnd && end)} title={t('edit.reverseTitle')}
+            onClick={reverseRoute}><Icon name="reverse" /><span>{t('edit.reverse')}</span></button>
           <button type="button" onClick={() => setFitRequest(n => n + 1)}><Icon name="fit" /><span>{t('edit.fit')}</span></button>
         </div>
       </div>

@@ -133,6 +133,8 @@ export const nl: Record<keyof typeof en, string> = {
   'edit.remove': 'Verwijderen',
   'edit.removePoint': 'Punt verwijderen',
   'edit.fit': 'Alles in beeld',
+  'edit.reverse': 'Omdraaien',
+  'edit.reverseTitle': 'Looprichting van de route omdraaien',
   'error.chooseStart': 'Kies een startlocatie via zoeken of de kaart.',
   'error.distanceRange': 'Kies een afstand tussen {min} en {max} km.',
   'error.radius': 'Kies een positieve straal.',
