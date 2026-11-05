@@ -526,6 +526,35 @@ it('adds points while editing from a line handle or one deliberate map tap', asy
   expect(screen.getByRole('button', { name: /^Remove point \d$/ })).toBeEnabled();
 });
 
+it('reverses a loop through its points and can undo it', async () => {
+  const source = savedSearch();
+  const first = { latitude: 52.1, longitude: 5.13 }, second = { latitude: 52.11, longitude: 5.14 };
+  vi.mocked(generate).mockResolvedValue(source.candidates);
+  vi.mocked(editRoute).mockResolvedValue({ preview: { ...candidate(), id: 'seed' }, request: source.request,
+    points: [first, second], isLoop: true });
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit route 1' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Reverse' }));
+  await waitFor(() => expect(previewRoute).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  expect(vi.mocked(previewRoute).mock.calls[0][0]).toMatchObject({ start: source.request.start, points: [second, first, source.request.start] });
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+  await waitFor(() => expect(screen.getByTestId('draft-map')).toHaveTextContent('seed'));
+  expect(previewRoute).toHaveBeenCalledTimes(1);
+});
+
+it('reverses a point-to-point route by swapping its start and finish', async () => {
+  const source = savedSearch();
+  const first = { latitude: 52.1, longitude: 5.13 }, finish = { latitude: 52.12, longitude: 5.15 };
+  vi.mocked(generate).mockResolvedValue(source.candidates);
+  vi.mocked(editRoute).mockResolvedValue({ preview: { ...candidate(), id: 'seed' }, request: { ...source.request, end: finish },
+    points: [first], isLoop: false });
+  render(<App />); await chooseStart(); await toPreferences(); await search();
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit route 1' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Reverse' }));
+  await waitFor(() => expect(previewRoute).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  expect(vi.mocked(previewRoute).mock.calls[0][0]).toMatchObject({ start: finish, points: [first, source.request.start] });
+});
+
 it('restores a saved complete route with a closed loop and no duplicate finish marker or new routing calls', async () => {
   const saved = savedSearch('manual', true);
   saved.request.isEditedRoute = true;

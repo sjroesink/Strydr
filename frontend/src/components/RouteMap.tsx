@@ -42,6 +42,25 @@ maplibregl.addProtocol('pmtiles', new Protocol().tile);
 
 // MapLibre keeps the grab offset for the whole gesture. Shifting it once the drag
 // starts moves the point above the finger, so you can see where it will land.
+// A chevron pointing along the line, drawn once and repeated by symbol layers so
+// the route shows which way it runs. Re-added whenever a basemap swap drops it.
+const ARROW_IMAGE = 'route-arrow';
+function addArrowImage(map: maplibregl.Map) {
+  if (map.hasImage(ARROW_IMAGE)) return;
+  const ratio = 2, size = 18 * ratio;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  context.lineCap = 'round'; context.lineJoin = 'round';
+  const chevron = () => { context.beginPath(); context.moveTo(12, 9); context.lineTo(24, 18); context.lineTo(12, 27); context.stroke(); };
+  context.strokeStyle = 'rgba(0, 0, 0, .6)'; context.lineWidth = 10; chevron();
+  context.strokeStyle = '#ffffff'; context.lineWidth = 5; chevron();
+  map.addImage(ARROW_IMAGE, context.getImageData(0, 0, size, size), { pixelRatio: ratio });
+}
+const arrowLayout = { 'symbol-placement': 'line', 'symbol-spacing': 90, 'icon-image': ARROW_IMAGE,
+  'icon-allow-overlap': true, 'icon-ignore-placement': true, 'icon-rotation-alignment': 'map', 'icon-keep-upright': false } as const;
+
 function liftAboveFinger(marker: maplibregl.Marker) {
   const internal = marker as unknown as { _positionDelta?: { add: (p: { x: number; y: number }) => unknown } | null };
   if (internal._positionDelta?.add) internal._positionDelta = internal._positionDelta.add({ x: 0, y: TOUCH_LIFT_PX }) as typeof internal._positionDelta;
@@ -97,7 +116,9 @@ export default function RouteMap(props: Props) {
     appliedStyle.current = selectedStyle;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
     map.on('error', () => setError('map.tilesFailed'));
+    map.on('styleimagemissing', event => { if (event.id === ARROW_IMAGE) addArrowImage(map); });
     map.on('load', () => {
+      addArrowImage(map);
       map.addSource('radius', { type: 'geojson', data: empty });
       map.addLayer({ id: 'radius-fill', type: 'fill', source: 'radius', paint: { 'fill-color': '#215c45', 'fill-opacity': .06 } });
       map.addLayer({ id: 'radius-line', type: 'line', source: 'radius', paint: { 'line-color': '#215c45', 'line-width': 1.5, 'line-dasharray': [3, 3] } });
@@ -109,6 +130,7 @@ export default function RouteMap(props: Props) {
           'line-opacity': ['case', ['boolean', ['get', 'stale'], false], .55, 1],
           'line-dasharray': ['case', ['boolean', ['get', 'stale'], false], ['literal', [2, 1]],
             ['boolean', ['get', 'routed'], false], ['literal', [1, 0]], ['literal', [1, 2]]] } });
+      map.addLayer({ id: 'drawing-arrows', type: 'symbol', source: 'drawing', filter: ['boolean', ['get', 'routed'], false], layout: arrowLayout });
       map.addSource('routes', { type: 'geojson', data: empty });
       map.addLayer({ id: 'route-halo', type: 'line', source: 'routes', layout: { 'line-cap': 'round', 'line-join': 'round',
         'line-sort-key': ['case', ['boolean', ['get', 'active'], false], 1, 0] },
@@ -120,6 +142,8 @@ export default function RouteMap(props: Props) {
         paint: { 'line-color': ['get', 'color'], 'line-width': ['case', ['boolean', ['get', 'active'], false], 6, 4.5],
           'line-opacity': ['case', ['boolean', ['get', 'active'], false], 1, .6],
           'line-dasharray': ['case', ['boolean', ['get', 'diagnostic'], false], ['literal', [2, 2]], ['literal', [1, 0]]] } });
+      // Only the route in focus shows its direction, so overlapping options stay readable.
+      map.addLayer({ id: 'route-arrows', type: 'symbol', source: 'routes', filter: ['boolean', ['get', 'active'], false], layout: arrowLayout });
       for (const layer of map.getStyle().layers) {
         const themed = themeOverlay(layer, latest.current.colorScheme);
         if (themed !== layer && themed.type === 'line' && themed.paint?.['line-color'])

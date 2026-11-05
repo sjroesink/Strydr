@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 export type IconName = 'run' | 'walk' | 'bike' | 'green' | 'unpaved' | 'system' | 'sun' | 'moon' | 'download' | 'edit'
-  | 'back' | 'next' | 'close' | 'plus' | 'minus' | 'undo' | 'trash' | 'fit' | 'pin' | 'locate' | 'chevron' | 'check' | 'move' | 'link' | 'send' | 'external';
+  | 'back' | 'next' | 'close' | 'plus' | 'minus' | 'undo' | 'trash' | 'fit' | 'pin' | 'locate' | 'chevron' | 'check' | 'move' | 'link' | 'send' | 'external' | 'reverse';
 const shapes: Record<IconName, ReactNode> = {
   run: <><circle cx="16" cy="4" r="2" /><path d="m12 8 4 3 4-1M12 8l-3 5 5 3-1 5M9 13l-4 1-2-3M12 8 8 7 5 10" /></>,
   walk: <><circle cx="14" cy="4" r="2" /><path d="m13 8-2 6 5 3 1 5M11 14l-3 8M13 8l4 4 3 1M13 8l-4 3-2 3" /></>,
@@ -28,6 +28,7 @@ const shapes: Record<IconName, ReactNode> = {
   move: <path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" />,
   send: <><path d="M21 3 10 14" /><path d="m21 3-7 18-4-7-7-4 18-7Z" /></>,
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
+  reverse: <path d="M7 4 3 8l4 4M3 8h14M17 12l4 4-4 4M21 16H7" />,
   external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></>,
 };
 
