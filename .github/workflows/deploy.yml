@@ -45,6 +45,9 @@ jobs:
           npm ci
           npm test
           npm run build
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+          npm run test:pwa
 
       # The Unraid webhook verifies this OIDC token, fast-forwards the server checkout to
       # this commit (with the short-lived repository token, as the repo is private),

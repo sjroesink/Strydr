@@ -25,7 +25,8 @@ for (const language of ['NL', 'EN']) {
     await expect(page.locator('.route-card')).toHaveCount(3);
     await page.getByRole('button', { name: language, exact: true }).click();
     await page.reload();
-    const adjust = page.getByRole('button', { name: language === 'NL' ? 'Zoekopdracht aanpassen' : 'Adjust search', exact: true });
+    const adjust = page.getByRole('button', { name: language === 'NL' ? 'Start wijzigen' : 'Change start', exact: true });
+    await expect(page.getByRole('button', { name: language === 'NL' ? 'Zoekopdracht aanpassen' : 'Adjust search', exact: true })).toHaveCount(0);
     await expect(adjust).toBeVisible();
     await adjust.focus(); await page.keyboard.press('Enter');
     await expect(page.locator('input[name="activity"][value="walking"]')).toBeChecked();

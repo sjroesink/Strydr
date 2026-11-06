@@ -1,5 +1,14 @@
 // Source dictionary. Every key here must also exist in nl.ts (enforced by its type).
 export const en = {
+  'pwa.title': 'Meander app',
+  'pwa.install': 'Install Meander',
+  'pwa.offline': 'You are offline. Meander can open, but maps, location search, saved routes, route planning and Garmin need internet. Routes are not stored offline.',
+  'errors.offline': 'You are offline. Reconnect to use maps, search, routes and Garmin.',
+  'pwa.updateReady': 'An update is ready. You can finish planning first; nothing reloads automatically.',
+  'pwa.update': 'Update and reload',
+  'pwa.updateConfirm': 'Reload Meander to update? Your current unsaved planner and route edits will be lost. Your language and appearance preferences stay saved. Cancel to finish planning first.',
+  'pwa.ios': 'On iPhone or iPad, open Meander in Safari. Use Share → Add to Home Screen → Add. Maps and route planning still need internet.',
+  'pwa.installFailed': 'Installation did not finish. You can still use Meander in your browser.',
   'brand.home': 'Meander home',
   'theme.group': 'Appearance',
   'theme.system': 'System theme',
@@ -54,6 +63,7 @@ export const en = {
   'end.label': 'End location',
   'end.placeholder': 'Where would you like to finish?',
   'end.pickOnMap': 'Pick finish on map',
+  'end.cancelPick': 'Cancel finish selection',
   'shape.passThrough': 'Pass through a spot',
   'shape.doneDrawing': 'Done drawing',
   'shape.editOnMap': 'Edit on map',

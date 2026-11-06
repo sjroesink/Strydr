@@ -3,6 +3,7 @@ import { useI18n } from '../i18n';
 import type { ServiceConnectionStatus, ServiceKind } from '../types';
 import { SERVICE_APPS, SERVICE_NAMES } from '../useConnections';
 import { Icon } from './Icon';
+import { useOnline } from '../pwa';
 
 export type ExportFormat = 'gpx' | 'fit';
 // A sent route remembers where the service shows it; null when the service gave no link.
@@ -16,6 +17,7 @@ export function ExportMenu({ busy, preparing, sending, services, sent, onExport,
   connectHref(service: ServiceKind): string; onConnect(service: ServiceKind): void;
 }) {
   const { t } = useI18n();
+  const online = useOnline();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLUListElement>(null);
@@ -40,11 +42,11 @@ export function ExportMenu({ busy, preparing, sending, services, sent, onExport,
   const label = preparing ? t('route.preparing') : sending ? t('route.sending') : t('route.export');
 
   return <>
-    <button ref={trigger} type="button" className="route-action route-action-download" disabled={busy}
+    <button ref={trigger} type="button" className="route-action route-action-download" disabled={busy || !online}
       aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
       <Icon name="download" />{label}<Icon name="chevron" className="export-chevron" />
     </button>
-    {open && <ul ref={panel} id={panelId} className="export-menu">
+    {open && online && <ul ref={panel} id={panelId} className="export-menu">
       <li><button type="button" onClick={choose(() => onExport('gpx'))}>
         <Icon name="download" /><span>{t('route.download')}<small>{t('route.downloadHint')}</small></span></button></li>
       <li><button type="button" onClick={choose(() => onExport('fit'))}>

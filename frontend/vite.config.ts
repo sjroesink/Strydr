@@ -1,8 +1,9 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import { appShell } from './pwa/build.ts';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), appShell()],
   worker: { format: 'es' },
   server: {
     port: 5173, strictPort: true,

@@ -55,6 +55,31 @@ docker run --rm -p 127.0.0.1:8080:8080 -v meander-routes:/app/data -e Ors__ApiKe
 
 The image serves the built frontend and API on one origin, runs as a non-root user, and contains no ORS key. Open `http://127.0.0.1:8080`. MapTiler configuration is applied at frontend build time. Azure provisioning and deployment are intentionally deferred.
 
+## Installable app (PWA)
+
+The **production build** is installable as **Meander** on HTTPS (localhost is also a secure development context). Use the browser's installation menu, or the small **Install Meander** button when the browser offers native installation. On iPhone/iPad, open the site in Safari and choose **Share → Add to Home Screen**; the app shows these instructions only on iOS/iPadOS. Installed launches use standalone display and the existing Meander mark.
+
+After one successful online visit has installed the worker, the generic app shell can reopen offline. **This is not an offline route planner:** maps, geocoding, saved-route loading, route generation/editing/exports and Garmin require internet. The NL/EN notice states that limitation; critical controls are unavailable offline. Existing in-memory choices are not reset when connectivity changes. No route geometries, saved-search IDs, API/authentication responses, Garmin data or map tiles are put into service-worker storage. API fetches also bypass the browser HTTP cache. External map providers and OpenStreetMap tiles are never prefetched or bulk-cached.
+
+The worker precaches only build-listed local shell assets. Its cache version hashes both those bytes and the worker source. Controlled navigations use their matching pinned HTML rather than mixing stale HTML with new hashed JavaScript. Activation keeps at most the current and one preceding Meander shell (for older open tabs), and deletes no other app's caches. `/sw.js`, the manifest and HTML revalidate with `Cache-Control: no-cache`; only `/` and `/routes/...` are SPA entry points. The manifest and scope are origin-relative, so each public hostname maintains its own installation and cache.
+
+Updates wait: nothing reloads automatically. **Update and reload** asks for explicit confirmation and warns that the current unsaved wizard/route edits will be lost; saved language/appearance preferences remain. Finish planning first, or close all Meander windows to let the browser activate the waiting worker naturally. Only the consenting tab reloads; other open planners are left alone.
+
+Verification (requires .NET 10 and Playwright Chromium):
+
+```sh
+cd frontend
+npm ci
+npx playwright install --with-deps chromium
+npm test
+npm run test:e2e
+npm run test:pwa
+```
+
+`test:pwa` builds and serves the real production frontend through ASP.NET on loopback. It checks manifest/icon dimensions, MIME/cache headers, browser installability in a normal persistent context, real service-worker-controlled offline refresh, cache exclusions, reconnect, and consent-only updates across two tabs. The separate UI suite exercises real MapLibre selected-route framing and keyboard-accessible route-shape/endpoint-picker controls with local fixtures, not production routing/Garmin writes. Browser checks do not claim a physical phone/home-screen installation. `CHROMIUM_EXECUTABLE_PATH` can select an existing Chromium executable for the PWA suite.
+
+Icons are actual opaque PNGs (192/512 normal and separate maskable safe-zone artwork, plus 180px Apple touch icon), generated from the existing favicon mark. Regenerate with `node scripts/generate-icons.mjs [Chromium executable]`. No new runtime dependency is required. The build hook follows Vite's plugin API; worker lifecycle/install behavior follows the W3C Service Workers specification and Chrome's user-consented update guidance.
+
 ## Run without API keys
 
 Both keys are optional replacements for hosted services. Keyless mode uses three local services for the Netherlands:

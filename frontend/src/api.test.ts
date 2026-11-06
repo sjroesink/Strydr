@@ -16,7 +16,7 @@ it('sends the language when geocoding', async () => {
   try {
     const signal = new AbortController().signal;
     await geocode('Utrecht', 'nl', signal);
-    expect(fetchMock).toHaveBeenCalledWith('/api/geocode?q=Utrecht&lang=nl', { signal });
+    expect(fetchMock).toHaveBeenCalledWith('/api/geocode?q=Utrecht&lang=nl', { signal, cache: 'no-store' });
   } finally { vi.unstubAllGlobals(); }
 });
 

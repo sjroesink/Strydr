@@ -3,6 +3,7 @@ import { ApiError, geocode } from '../api';
 import { problemMessages } from '../apiText';
 import { useI18n, type Message } from '../i18n';
 import type { Place, Suggestion } from '../types';
+import { useOnline } from '../pwa';
 
 type Props = {
   label: string; value: string; place: Place | null; placeholder: string;
@@ -10,6 +11,7 @@ type Props = {
 };
 
 export function LocationSearch({ label, value, place, placeholder, onTextChange, onPick }: Props) {
+  const online = useOnline();
   const { t, say, number, language } = useI18n();
   const id = useId();
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -20,7 +22,7 @@ export function LocationSearch({ label, value, place, placeholder, onTextChange,
 
   useEffect(() => {
     setSuggestions([]); setActive(-1); setError(null); setSearching(false);
-    if (value.trim().length < 3 || place || !focused) return;
+    if (!online || value.trim().length < 3 || place || !focused) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setSearching(true);
@@ -31,7 +33,7 @@ export function LocationSearch({ label, value, place, placeholder, onTextChange,
       }).finally(() => { if (!controller.signal.aborted) setSearching(false); });
     }, 350);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [value, place, focused, language]);
+  }, [value, place, focused, language, online]);
 
   function select(suggestion: Suggestion) {
     onPick({ label: suggestion.label, location: suggestion.location });
@@ -42,7 +44,7 @@ export function LocationSearch({ label, value, place, placeholder, onTextChange,
     <label htmlFor={id}>{label}</label>
     <div className={`search-input ${place ? 'is-set' : ''}`}>
       <span className="location-dot" aria-hidden="true" />
-      <input id={id} role="combobox" autoComplete="off" placeholder={placeholder} value={value}
+      <input id={id} role="combobox" disabled={!online} autoComplete="off" placeholder={placeholder} value={value}
         aria-autocomplete="list" aria-expanded={focused && suggestions.length > 0}
         aria-controls={`${id}-results`} aria-activedescendant={active >= 0 ? `${id}-${active}` : undefined}
         aria-describedby={error ? `${id}-error` : undefined}

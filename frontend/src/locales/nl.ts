@@ -1,6 +1,15 @@
 import type { en } from './en';
 
 export const nl: Record<keyof typeof en, string> = {
+  'pwa.title': 'Meander-app',
+  'pwa.install': 'Meander installeren',
+  'pwa.offline': 'Je bent offline. Meander opent wel, maar kaarten, locaties zoeken, opgeslagen routes, routes plannen en Garmin hebben internet nodig. Routes worden niet offline bewaard.',
+  'errors.offline': 'Je bent offline. Maak verbinding voor kaarten, zoeken, routes en Garmin.',
+  'pwa.updateReady': 'Er staat een update klaar. Je kunt eerst je route afmaken; de app herlaadt niet automatisch.',
+  'pwa.update': 'Bijwerken en herladen',
+  'pwa.updateConfirm': 'Meander herladen om bij te werken? Je huidige niet-opgeslagen zoekopdracht en routebewerkingen gaan verloren. Je taal en weergave blijven bewaard. Annuleer om eerst je route af te maken.',
+  'pwa.ios': 'Open Meander op je iPhone of iPad in Safari. Kies Deel → Zet op beginscherm → Voeg toe. Kaarten en routes plannen hebben nog steeds internet nodig.',
+  'pwa.installFailed': 'De installatie is niet voltooid. Je kunt Meander gewoon in je browser gebruiken.',
   'brand.home': 'Meander startpagina',
   'theme.group': 'Weergave',
   'theme.system': 'Systeemthema',
@@ -55,6 +64,7 @@ export const nl: Record<keyof typeof en, string> = {
   'end.label': 'Eindlocatie',
   'end.placeholder': 'Waar wil je eindigen?',
   'end.pickOnMap': 'Kies eindpunt op kaart',
+  'end.cancelPick': 'Eindpunt kiezen annuleren',
   'shape.passThrough': 'Langs een plek gaan',
   'shape.doneDrawing': 'Klaar met tekenen',
   'shape.editOnMap': 'Bewerk op kaart',

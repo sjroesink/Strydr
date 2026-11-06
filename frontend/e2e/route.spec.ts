@@ -40,7 +40,7 @@ test('draw a fixed section with map clicks, export it, and complete it into a lo
   await page.getByRole('button', { name: /Next: preferences/ }).click();
   await expect(page.locator('.map-marker')).toHaveCount(1);
   await page.waitForTimeout(650);
-  await page.getByRole('button', { name: /Pass through a spot/ }).click();
+  await page.getByRole('checkbox', { name: 'Pass through a spot' }).check();
   await page.waitForTimeout(350);
   const previewPending = page.waitForResponse(response => new URL(response.url()).pathname === '/api/routes/preview' && response.request().method() === 'POST');
   await clickFreeMap(page, .58, .58);

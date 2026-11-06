@@ -10,6 +10,7 @@ import type { ColorScheme } from '../useTheme';
 import { preserveRouteOverlays, themeOverlay } from '../mapTheme';
 import { resolveMapStyle, type MapEnv } from '../mapStyle';
 import { segmentMidpoints } from '../routeEditing';
+import { fitRoutes, useSelectedRouteFit } from '../mapCamera';
 import { useI18n, type Language, type MessageKey } from '../i18n';
 
 export const ROUTE_COLORS = ['#d3733c', '#466bc3', '#9363a9'];
@@ -96,6 +97,7 @@ export default function RouteMap(props: Props) {
   // Memoized so a generated PMTiles style keeps its identity and is only swapped on theme changes.
   const { style: selectedStyle, configured } = useMemo(() => resolveMapStyle(import.meta.env as MapEnv, props.colorScheme, props.language), [props.colorScheme, props.language]);
   const appliedStyle = useRef<string | StyleSpecification | null>(null);
+  useSelectedRouteFit(mapRef, ready, props.candidates.find(route => route.id === props.selectedId) ?? null, props.padding);
 
   useEffect(() => {
     if (!container.current) return;
@@ -316,7 +318,7 @@ export default function RouteMap(props: Props) {
   }, [props.padding.top, props.padding.right, props.padding.bottom, props.padding.left, ready]);
 
   useEffect(() => {
-    if (!mapRef.current || !ready) return;
+    if (!mapRef.current || !ready || props.candidates.length) return;
     if (draggingMarker.current) return;
     if (suppressFitAfterDrag.current && !props.candidates.length) {
       if (props.preview || !props.drawnPoints.length) suppressFitAfterDrag.current = false;
@@ -324,11 +326,9 @@ export default function RouteMap(props: Props) {
     }
     suppressFitAfterDrag.current = false;
     if (props.mode === 'draw' && props.drawnPoints.length > 0) return;
-    const routes = props.candidates.length ? props.candidates : props.preview ? [props.preview] : [];
+    const routes = props.preview ? [props.preview] : [];
     if (routes.length) {
-      const bounds = new maplibregl.LngLatBounds();
-      routes.forEach(route => route.geometry.coordinates.forEach(point => bounds.extend([point[0], point[1]])));
-      mapRef.current.fitBounds(bounds, { padding: 48, maxZoom: 15, duration: 650 });
+      fitRoutes(mapRef.current, routes, props.padding);
     } else if (props.start) mapRef.current.easeTo({ center: [props.start.longitude, props.start.latitude], zoom: 13, duration: 600 });
   }, [props.candidates, props.start, props.preview, props.mode, props.fitRequest, ready]);
 

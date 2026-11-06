@@ -49,8 +49,58 @@ async function toPreferences() {
   await userEvent.click(screen.getByRole('button', { name: /Next: preferences/ }));
 }
 async function search() { await userEvent.click(screen.getByRole('button', { name: /Find my routes/ })); }
-async function startDrawing() { await userEvent.click(screen.getByRole('button', { name: /Pass through a spot/ })); }
+async function startDrawing() { await userEvent.click(screen.getByRole('checkbox', { name: 'Pass through a spot' })); }
 const greenCard = () => screen.getByRole('checkbox', { name: /Green surroundings/ });
+
+it('uses real route-shape checkboxes and clears unchecked endpoint/via constraints from requests', async () => {
+  vi.mocked(generate).mockResolvedValue([candidate()]);
+  render(<App />); await chooseStart(); await toPreferences();
+  const endpoint = screen.getByRole('checkbox', { name: 'Finish somewhere else' });
+  const via = screen.getByRole('checkbox', { name: 'Pass through a spot' });
+  expect(endpoint).not.toBeChecked(); expect(via).not.toBeChecked();
+  await userEvent.click(endpoint);
+  await userEvent.click(screen.getByRole('button', { name: 'Pick finish on map' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Set end fixture' }));
+  expect(screen.getByLabelText('End location')).toHaveValue('52.09000, 5.12000');
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Finish somewhere else' }));
+  expect(screen.queryByLabelText('End location')).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Pass through a spot' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Set draw fixture' }));
+  await waitFor(() => expect(previewRoute).toHaveBeenCalled());
+  expect(screen.getByRole('checkbox', { name: 'Pass through a spot' })).toBeChecked();
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Pass through a spot' }));
+  expect(screen.getByRole('checkbox', { name: 'Pass through a spot' })).not.toBeChecked();
+  await search();
+  expect(generate).toHaveBeenLastCalledWith(expect.objectContaining({ end: null, drawnRouteId: null }), expect.any(AbortSignal));
+});
+
+it('hides search and blocks form submission while picking an endpoint, then restores choices on pick or cancel', async () => {
+  render(<App />); await chooseStart(); await toPreferences();
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Finish somewhere else' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Pick finish on map' }));
+  expect(screen.queryByRole('button', { name: /Find my routes/ })).not.toBeInTheDocument();
+  fireEvent.submit(screen.getByRole('form', { name: 'Plan a route' }));
+  expect(generate).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: 'Set end fixture' }));
+  expect(screen.getByLabelText('End location')).toHaveValue('52.09000, 5.12000');
+  expect(screen.getByRole('button', { name: /Find my routes/ })).toBeVisible();
+  await userEvent.click(screen.getByRole('button', { name: 'Pick finish on map' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel finish selection' }));
+  expect(screen.getByLabelText('End location')).toHaveValue('52.09000, 5.12000');
+  expect(screen.getByRole('button', { name: /Find my routes/ })).toBeVisible();
+});
+
+it('keeps wizard choices while offline and disables route generation until reconnect', async () => {
+  render(<App />); await chooseStart(); await toPreferences();
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false); fireEvent(window, new Event('offline'));
+  expect(screen.getByRole('button', { name: /Find my routes/ })).toBeDisabled();
+  expect(screen.getByRole('status')).toHaveTextContent('You are offline');
+  await search(); expect(generate).not.toHaveBeenCalled();
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true); fireEvent(window, new Event('online'));
+  expect(screen.getByRole('button', { name: /Find my routes/ })).toBeEnabled();
+  await userEvent.click(screen.getByRole('button', { name: 'Back to distance' }));
+  expect(screen.getByLabelText('How far?')).toHaveValue(5);
+});
 
 it('walks through the questions one step at a time and back again', async () => {
   render(<App />);
@@ -86,14 +136,15 @@ it.each([false, true])('returns to settings without losing the search or results
     await toPreferences(); await search();
   }
   await screen.findByRole('button', { name: /Route 1/ });
-  const adjust = screen.getByRole('button', { name: 'Adjust search' });
+  expect(screen.queryByRole('button', { name: 'Adjust search' })).not.toBeInTheDocument();
+  const adjust = screen.getByRole('button', { name: 'Change start' });
   adjust.focus(); await userEvent.keyboard('{Enter}');
   expect(screen.getByRole('heading', { name: 'Where do you start?' })).toBeInTheDocument();
   expect(screen.getByLabelText('Start location')).toHaveValue('52.09000, 5.12000');
   expect(screen.getByRole('radio', { name: 'Walk' })).toBeChecked();
   await userEvent.click(screen.getByRole('button', { name: 'Back to routes' }));
   expect(screen.getByRole('button', { name: /Route 1/ })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole('button', { name: 'Adjust search' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Change start' }));
   await toDistance();
   expect(screen.getByLabelText('How far?')).toHaveValue(12);
   if (restored) expect(screen.getByLabelText('Distance margin')).toHaveValue('20');
@@ -328,7 +379,8 @@ it('supports a different end, walking, and a radius', async () => {
   await userEvent.click(screen.getByRole('checkbox', { name: /Stay close to home/ }));
   fireEvent.change(screen.getByLabelText('Maximum radius'), { target: { value: '3' } });
   await toPreferences();
-  await userEvent.click(screen.getByRole('button', { name: /Finish somewhere else/ }));
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Finish somewhere else' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Pick finish on map' }));
   await userEvent.click(screen.getByRole('button', { name: 'Set end fixture' }));
   await search();
   expect(generate).toHaveBeenCalledWith(expect.objectContaining({ end: { latitude: 52.09, longitude: 5.12 }, activity: 'walking', radiusKm: 3 }), expect.any(AbortSignal));
@@ -598,7 +650,7 @@ it('restores a saved complete route with a closed loop and no duplicate finish m
   render(<App />);
   await screen.findByRole('button', { name: /Route 1/ });
   expect(screen.queryByRole('region', { name: 'Drawn route section' })).not.toBeInTheDocument();
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });
   expect(previewRoute).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole('button', { name: 'Move first fixture' }));
   await screen.findByRole('button', { name: 'Save changes' });

@@ -11,6 +11,8 @@ import { insertionIndex as findInsertionIndex } from './routeEditing';
 import { Icon, type IconName } from './components/Icon';
 import { useTheme, type ThemePreference } from './useTheme';
 import { I18nProvider, useI18n, type Message, type MessageKey } from './i18n';
+import { PwaStatus } from './PwaStatus';
+import { useOnline } from './pwa';
 import { MessageError, failureMessages, warningMessage } from './apiText';
 
 const MAX_DISTANCE = Number(import.meta.env.VITE_MAX_DISTANCE_KM) || 60;
@@ -140,10 +142,14 @@ function useSheetSwipe(collapsed: boolean, setCollapsed: (collapsed: boolean) =>
 }
 
 function Planner() {
+  const online = useOnline();
   const { t, say, number, language, setLanguage } = useI18n();
   const { preference: themePreference, colorScheme, changePreference } = useTheme();
   const [step, setStep] = useState<Step>('start');
   const [sheetCollapsed, setSheetCollapsed] = useState(false);
+  const endPickButton = useRef<HTMLButtonElement>(null);
+  const endPickCancel = useRef<HTMLButtonElement>(null);
+  const wasPickingEnd = useRef(false);
   const sheetSwipe = useSheetSwipe(sheetCollapsed, setSheetCollapsed);
   const [hintDismissed, setHintDismissed] = useState(readHintDismissed);
   const [fitRequest, setFitRequest] = useState(0);
@@ -212,7 +218,13 @@ function Planner() {
   // Results that were cleared by a change fall back to the last question.
   const view: Step | 'edit' = isEditingRoute ? 'edit'
     : step === 'routes' && phase === 'idle' && candidates.length === 0 ? 'preferences' : step;
-  const padding = useMapPadding([view, sheetCollapsed, mode === 'browse']);
+  const pickingEnd = view === 'preferences' && mode === 'end' && hasEnd;
+  const padding = useMapPadding([view, sheetCollapsed, mode === 'browse', pickingEnd]);
+  useEffect(() => {
+    if (pickingEnd) endPickCancel.current?.focus({ preventScroll: true });
+    else if (wasPickingEnd.current) endPickButton.current?.focus({ preventScroll: true });
+    wasPickingEnd.current = pickingEnd;
+  }, [pickingEnd]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -367,7 +379,7 @@ function Planner() {
     else resetDrawingHistory();
     invalidate();
     if (which === 'start') { setStart(place); setStartText(place.label); }
-    else { setEnd(place); setEndText(place.label); }
+    else { setEnd(place); setEndText(place.label); setSheetCollapsed(false); }
     if (mode !== 'draw') setMode('browse');
   }
   function pickMapPoint(location: Location) {
@@ -453,8 +465,13 @@ function Planner() {
   function toggleEnd() {
     resetDrawingHistory();
     invalidate(); setHasEnd(value => !value); setEnd(null); setEndText('');
-    setMode(hasEnd ? 'browse' : 'end');
+    setMode('browse');
   }
+  function beginEndPick() {
+    setMode('end');
+    if (!window.matchMedia?.('(min-width: 760px)').matches) setSheetCollapsed(true);
+  }
+  function cancelEndPick() { setMode('browse'); setSheetCollapsed(false); }
   function locate() {
     resetDrawingHistory();
     invalidate();
@@ -474,6 +491,7 @@ function Planner() {
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (pickingEnd) return;
     // Enter on an earlier question moves on instead of searching.
     if (view === 'start' || view === 'distance') { next(); return; }
     setError([]); setNotice(null);
@@ -757,30 +775,33 @@ function Planner() {
       </fieldset>
       <div className="option-list">
         <span className="option-heading">{t('shape.heading')}</span>
-        <div className="option-row">
-          <button type="button" className="option-button" aria-expanded={hasEnd} onClick={toggleEnd}>
-            <span>{t('shape.finishElsewhere')}</span><span className="option-value">{hasEnd ? t('shape.makeLoop') : t('shape.sameAsStart')}<Icon name="chevron" /></span></button>
+        <fieldset className="preference-cards shape-cards"><legend className="visually-hidden">{t('shape.heading')}</legend>
+          <label className={hasEnd ? 'selected' : ''}>
+            <input type="checkbox" checked={hasEnd} onChange={toggleEnd} />
+            <Icon name="pin" /><span>{t('shape.finishElsewhere')}</span><span className="card-check" aria-hidden="true"><Icon name="check" /></span></label>
+          <label className={mode === 'draw' || drawnPoints.length > 0 ? 'selected' : ''}>
+            <input type="checkbox" checked={mode === 'draw' || drawnPoints.length > 0}
+              onChange={event => { if (event.target.checked) setMode('draw'); else clearDrawing(); }} />
+            <Icon name="pin" /><span>{t('shape.passThrough')}</span><span className="card-check" aria-hidden="true"><Icon name="check" /></span></label>
+        </fieldset>
           {hasEnd && <div className="end-section">
             <LocationSearch label={t('end.label')} placeholder={t('end.placeholder')} value={endText} place={end}
               onTextChange={value => { resetDrawingHistory(); invalidate(); setEnd(null); setEndText(value); }} onPick={place => pick('end', place)} />
-            <button type="button" className="chip-button" aria-pressed={mode === 'end'} onClick={() => setMode(current => current === 'end' ? 'browse' : 'end')}>
+            <button ref={endPickButton} type="button" className="chip-button" aria-pressed={mode === 'end'} onClick={beginEndPick}>
               <Icon name="pin" />{t('end.pickOnMap')}</button>
           </div>}
-        </div>
-        <div className="option-row">
-          <button type="button" className="option-button" aria-pressed={mode === 'draw'}
+        {(mode === 'draw' || drawnPoints.length > 0) && <>
+          <button type="button" className="chip-button" aria-pressed={mode === 'draw'}
             onClick={() => setMode(current => current === 'draw' ? 'browse' : 'draw')}>
-            <span>{t('shape.passThrough')}</span><span className="option-value">{mode === 'draw' ? t('shape.doneDrawing') : drawnPoints.length ? t('shape.editOnMap') : t('shape.drawOnMap')}<Icon name="chevron" /></span></button>
+            {t(mode === 'draw' ? 'shape.doneDrawing' : 'shape.editOnMap')}</button>
           {drawingSection}
-        </div>
+        </>}
       </div>
     </>;
   }
 
   function renderRoutes() {
     return <>
-      <button type="button" className="chip-button" disabled={restoring || phase === 'loading'} onClick={() => goTo('start')}>
-        <Icon name="back" />{t('results.adjustSearch')}</button>
       <div className="step-summary">
         <button type="button" aria-label={t('summary.changeStart')} onClick={() => goTo('start')}>
           <Icon name="check" /><span><small>{t('step.start')}</small>{t('summary.start', { activity: t(activityLabel(activity)), place: start?.label ?? '…' })}</span><span className="summary-change">{t('summary.change')}</span></button>
@@ -879,7 +900,7 @@ function Planner() {
             <span>{t('drawing.points', { count: drawnPoints.length })}</span></div>
           <form onSubmit={event => void submit(event)} noValidate>
             <button type="submit" className="primary-pill" aria-label={t('edit.saveLabel')}
-              disabled={!draft || draftPhase !== 'ready' || editPhase !== 'idle'}>{editPhase === 'saving' ? t('edit.saving') : t('edit.save')}</button>
+              disabled={!online || !draft || draftPhase !== 'ready' || editPhase !== 'idle'}>{editPhase === 'saving' ? t('edit.saving') : t('edit.save')}</button>
           </form>
         </div>
         {(draftError.length > 0 || error.length > 0) ? <div className="edit-banner is-error" role="alert">
@@ -912,17 +933,21 @@ function Planner() {
     style={{ '--inset-top': `${padding.top}px`, '--inset-bottom': `${padding.bottom}px`, '--inset-left': `${padding.left}px` } as React.CSSProperties}>
     {routeMap}
     <header className="top-bar" data-map-overlay="topbar">{brand}<div className="top-controls">{languagePicker}{themePicker}</div></header>
-    <aside className="planner-sheet" aria-label={t('sheet.planner')} data-map-overlay="sheet" {...sheetSwipe}>
-      <button type="button" className="sheet-grabber" aria-expanded={!sheetCollapsed}
+    <aside className="planner-sheet" aria-label={t('sheet.planner')} data-map-overlay="sheet" {...(pickingEnd ? {} : sheetSwipe)}>
+      <button type="button" className="sheet-grabber" disabled={pickingEnd} aria-expanded={!sheetCollapsed}
         aria-label={sheetCollapsed ? t('sheet.show') : t('sheet.more')} onClick={() => setSheetCollapsed(value => !value)}><span /></button>
       <div className="sheet-body">
         {view === 'routes' ? renderRoutes() : <form className="wizard-step" onSubmit={event => void submit(event)} noValidate aria-label={t('wizard.form')}>
+          {pickingEnd ? <div className="endpoint-picker">
+            <p role="status">{t('map.tapToFinish')}</p>
+            <button ref={endPickCancel} type="button" className="chip-button" onClick={cancelEndPick}>{t('end.cancelPick')}</button>
+          </div> : <>
           {renderQuestion()}
           {alerts}
           {editPhase === 'opening' && <p className="notice" role="status">{t('actions.openingEditor')}</p>}
           <div className="step-actions">
             {view === 'preferences' ? <>
-              <button type="submit" className="generate-button" disabled={phase === 'loading' || editPhase !== 'idle' || (drawnPoints.length > 0 || completeDrawing) && draftPhase !== 'ready'}>
+              <button type="submit" className="generate-button" disabled={!online || phase === 'loading' || editPhase !== 'idle' || (drawnPoints.length > 0 || completeDrawing) && draftPhase !== 'ready'}>
                 {phase === 'loading' ? <><span className="spinner" /> {restoring ? t('actions.opening') : t('actions.finding')}</>
                   : <>{t('actions.find')} <Icon name="next" /></>}
               </button>
@@ -930,13 +955,14 @@ function Planner() {
             </> : <button type="submit" className="generate-button">{t(view === 'start' ? 'actions.next.distance' : 'actions.next.preferences')} <Icon name="next" /></button>}
             {candidates.length > 0 && phase === 'done' && <button type="button" className="text-link" onClick={() => goTo('routes')}>{t('actions.backToRoutes')}</button>}
           </div>
+          </>}
         </form>}
-        {providerCredit}
+        {!pickingEnd && providerCredit}
       </div>
     </aside>
   </div>;
 }
 
 export default function App() {
-  return <I18nProvider><Planner /></I18nProvider>;
+  return <I18nProvider><Planner /><PwaStatus /></I18nProvider>;
 }

@@ -181,10 +181,23 @@ app.UseStatusCodePages(async context =>
         .ExecuteAsync(context.HttpContext);
 });
 var hasWebRoot = Directory.Exists(app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot"));
+var shellTypes = new FileExtensionContentTypeProvider();
+shellTypes.Mappings[".webmanifest"] = "application/manifest+json";
+var shellFiles = new StaticFileOptions
+{
+    ContentTypeProvider = shellTypes,
+    OnPrepareResponse = context =>
+    {
+        var path = context.Context.Request.Path;
+        if (path == "/sw.js" || path == "/index.html" || path == "/manifest.webmanifest")
+            context.Context.Response.Headers.CacheControl = "no-cache";
+        if (path == "/sw.js") context.Context.Response.Headers["Service-Worker-Allowed"] = "/";
+    }
+};
 if (hasWebRoot)
 {
     app.UseDefaultFiles();
-    app.UseStaticFiles();
+    app.UseStaticFiles(shellFiles);
 }
 if (mapDataPath is not null)
 {
@@ -268,7 +281,7 @@ app.MapConnectionEndpoints();
 // API misses must remain ProblemDetails even when the production SPA is present.
 app.MapFallback("/api/{**path}", () => Results.Problem(statusCode: 404, title: "API endpoint not found", extensions: new Dictionary<string, object?> { ["code"] = "apiNotFound" }));
 app.MapFallback("/map/{**path}", () => Results.Problem(statusCode: 404, title: "Map file not found", extensions: new Dictionary<string, object?> { ["code"] = "mapFileNotFound" }));
-if (hasWebRoot) app.MapFallbackToFile("index.html");
+if (hasWebRoot) app.MapFallbackToFile("/routes/{**path:nonfile}", "index.html", shellFiles);
 app.Run();
 
 static string ClientKey(HttpContext context) => context.Connection.RemoteIpAddress?.ToString() ?? "local";

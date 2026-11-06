@@ -122,6 +122,11 @@ button svg { flex-shrink:0; }
 .is-drawing .planner-sheet { max-height:min(48dvh, 440px); }
 .sheet-collapsed .planner-sheet { max-height:140px; }
 .sheet-collapsed .sheet-body { overflow:hidden; }
+@media (max-width:759px) {
+  /* Leave a real map viewport above selected results, rather than covering the route. */
+  .step-routes .planner-sheet { max-height:min(55dvh, 560px); }
+  .step-routes.sheet-collapsed .planner-sheet { max-height:140px; }
+}
 
 .wizard-step { display:flex; flex-direction:column; gap:20px; }
 
@@ -275,6 +280,10 @@ button svg { flex-shrink:0; }
 }
 .card-check .icon { width:14px !important; height:14px !important; color:inherit !important; stroke-width:3; }
 .preference-cards label.selected .card-check { display:grid; }
+.shape-cards { margin:12px 0 16px; }
+.endpoint-picker { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:70px; }
+.endpoint-picker p { margin:0; font-size:14px; line-height:1.4; }
+.endpoint-picker .chip-button { flex-shrink:0; max-width:50%; white-space:normal; line-height:1.3; padding:10px 12px; }
 .end-section { display:flex; flex-direction:column; gap:10px; padding:0 0 16px; }
 .end-section .chip-button { align-self:flex-start; }
 
