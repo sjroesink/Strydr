@@ -42,7 +42,10 @@ test('draw a fixed section with map clicks, export it, and complete it into a lo
   await page.waitForTimeout(650);
   await page.getByRole('checkbox', { name: 'Pass through a spot' }).check();
   await page.waitForTimeout(350);
-  const previewPending = page.waitForResponse(response => new URL(response.url()).pathname === '/api/routes/preview' && response.request().method() === 'POST');
+  // Slow renderers may dispatch the one-point preview between these clicks and then abort it.
+  // Wait for the two-point intent we actually assert below, not the first response headers.
+  const previewPending = page.waitForResponse(response => new URL(response.url()).pathname === '/api/routes/preview'
+    && response.request().method() === 'POST' && response.request().postDataJSON().points.length === 2);
   await clickFreeMap(page, .58, .58);
   await clickFreeMap(page, .68, .42);
   const previewResponse = await previewPending;
@@ -54,6 +57,7 @@ test('draw a fixed section with map clicks, export it, and complete it into a lo
   await expect(page.locator('.map-via-marker')).toHaveCount(3);
   await page.keyboard.press('Control+z');
   await expect(page.locator('.map-via-marker')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Find my routes' })).toBeEnabled();
 
   // Exercise the actual MapLibre mouse gesture, including on the mobile viewport.
   // Releasing a marker must move that point, without creating a new click point.
@@ -61,7 +65,9 @@ test('draw a fixed section with map clicks, export it, and complete it into a lo
   const firstMarker = page.locator('.map-via-marker').first();
   const markerBox = await firstMarker.boundingBox();
   if (!markerBox) throw new Error('Drawn point is not visible');
-  const movedPending = page.waitForResponse(response => new URL(response.url()).pathname === '/api/routes/preview' && response.request().method() === 'POST');
+  const movedPending = page.waitForResponse(response => new URL(response.url()).pathname === '/api/routes/preview'
+    && response.request().method() === 'POST' && response.request().postDataJSON().points.length === 2
+    && JSON.stringify(response.request().postDataJSON().points) !== JSON.stringify(originalPoints));
   await page.mouse.move(markerBox.x + markerBox.width / 2, markerBox.y + markerBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(markerBox.x + markerBox.width / 2 + 35, markerBox.y + markerBox.height / 2 + 25, { steps: 8 });
