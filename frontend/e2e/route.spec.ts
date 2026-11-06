@@ -65,13 +65,26 @@ test('draw a fixed section with map clicks, export it, and complete it into a lo
   const firstMarker = page.locator('.map-via-marker').first();
   const markerBox = await firstMarker.boundingBox();
   if (!markerBox) throw new Error('Drawn point is not visible');
+  const dragDiagnostics = await firstMarker.evaluate(element => {
+    const r = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    (window as any).__drawGesture = [];
+    for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup']) document.addEventListener(type, event => {
+      const e = event as MouseEvent;
+      (window as any).__drawGesture.push({ type, x: e.clientX, y: e.clientY, target: (e.target as Element)?.className });
+    }, true);
+    return { rect: { x: r.x, y: r.y, width: r.width, height: r.height }, hit: hit?.className, viewport: [innerWidth, innerHeight], transform: (element as HTMLElement).style.transform };
+  });
   const movedPending = page.waitForResponse(response => new URL(response.url()).pathname === '/api/routes/preview'
     && response.request().method() === 'POST' && response.request().postDataJSON().points.length === 2
-    && JSON.stringify(response.request().postDataJSON().points) !== JSON.stringify(originalPoints));
+    && JSON.stringify(response.request().postDataJSON().points) !== JSON.stringify(originalPoints), { timeout: 15000 });
   await page.mouse.move(markerBox.x + markerBox.width / 2, markerBox.y + markerBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(markerBox.x + markerBox.width / 2 + 35, markerBox.y + markerBox.height / 2 + 25, { steps: 8 });
   await page.mouse.up();
+  if (process.env.CI) console.log('[DRAW_GESTURE_DIAGNOSTIC]', JSON.stringify({ before: dragDiagnostics,
+    after: await page.evaluate(() => ({ events: (window as any).__drawGesture,
+      markers: [...document.querySelectorAll('.map-via-marker')].map(element => { const r = element.getBoundingClientRect(); return { text: element.textContent, x: r.x, y: r.y, className: element.className }; }) })) }));
   const movedResponse = await movedPending;
   expect(movedResponse.status()).toBe(200);
   const movedPoints = movedResponse.request().postDataJSON().points;
