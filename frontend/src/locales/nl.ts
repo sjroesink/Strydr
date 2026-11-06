@@ -96,6 +96,7 @@ export const nl: Record<keyof typeof en, string> = {
   'results.label': 'Routesuggesties',
   'results.one': 'Jouw route',
   'results.many': '{count} routes voor jou',
+  'results.adjustSearch': 'Zoekopdracht aanpassen',
   'results.savedLink': 'Link naar opgeslagen route',
   'results.downloadsUntil': 'GPX-downloads beschikbaar tot {time}.',
   'results.none': 'Geen routes gevonden',

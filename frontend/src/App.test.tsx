@@ -70,6 +70,40 @@ it('walks through the questions one step at a time and back again', async () => 
   expect(screen.getByLabelText('Start location')).toHaveValue('52.09000, 5.12000');
 });
 
+it.each([false, true])('returns to settings without losing the search or results (restored: %s)', async restored => {
+  const saved = savedSearch('settings');
+  vi.mocked(generate).mockResolvedValue(saved.candidates);
+  if (restored) {
+    window.history.replaceState(null, '', '/routes/settings');
+    vi.mocked(loadSearch).mockResolvedValue(saved);
+  }
+  render(<App />);
+  if (!restored) {
+    await chooseStart();
+    await userEvent.click(screen.getByRole('radio', { name: 'Walk' }));
+    await toDistance();
+    fireEvent.change(screen.getByLabelText('How far?'), { target: { value: '12' } });
+    await toPreferences(); await search();
+  }
+  await screen.findByRole('button', { name: /Route 1/ });
+  const adjust = screen.getByRole('button', { name: 'Adjust search' });
+  adjust.focus(); await userEvent.keyboard('{Enter}');
+  expect(screen.getByRole('heading', { name: 'Where do you start?' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Start location')).toHaveValue('52.09000, 5.12000');
+  expect(screen.getByRole('radio', { name: 'Walk' })).toBeChecked();
+  await userEvent.click(screen.getByRole('button', { name: 'Back to routes' }));
+  expect(screen.getByRole('button', { name: /Route 1/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Adjust search' }));
+  await toDistance();
+  expect(screen.getByLabelText('How far?')).toHaveValue(12);
+  if (restored) expect(screen.getByLabelText('Distance margin')).toHaveValue('20');
+  await toPreferences(); await search();
+  expect(generate).toHaveBeenLastCalledWith(expect.objectContaining({
+    start: saved.request.start, activity: 'walking', targetDistanceKm: 12,
+    ...(restored ? { radiusKm: 3, distanceFlexibilityPercent: 20, preferGreen: true, preferUnpaved: true } : {}),
+  }), expect.any(AbortSignal));
+});
+
 it('always enables backtracking avoidance when regenerating an older saved search', async () => {
   window.history.replaceState(null, '', '/routes/older');
   vi.mocked(loadSearch).mockResolvedValue(savedSearch('older'));

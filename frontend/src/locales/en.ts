@@ -95,6 +95,7 @@ export const en = {
   'results.label': 'Route suggestions',
   'results.one': 'Your route',
   'results.many': '{count} routes for you',
+  'results.adjustSearch': 'Adjust search',
   'results.savedLink': 'Saved route link',
   'results.downloadsUntil': 'GPX downloads available until {time}.',
   'results.none': 'No routes found',

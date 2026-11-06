@@ -779,6 +779,8 @@ function Planner() {
 
   function renderRoutes() {
     return <>
+      <button type="button" className="chip-button" disabled={restoring || phase === 'loading'} onClick={() => goTo('start')}>
+        <Icon name="back" />{t('results.adjustSearch')}</button>
       <div className="step-summary">
         <button type="button" aria-label={t('summary.changeStart')} onClick={() => goTo('start')}>
           <Icon name="check" /><span><small>{t('step.start')}</small>{t('summary.start', { activity: t(activityLabel(activity)), place: start?.label ?? '…' })}</span><span className="summary-change">{t('summary.change')}</span></button>

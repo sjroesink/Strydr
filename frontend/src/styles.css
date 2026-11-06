@@ -155,7 +155,11 @@ button svg { flex-shrink:0; }
   position:relative; display:flex; align-items:center; justify-content:center; gap:8px; min-height:44px;
   border-radius:12px; font-size:15px; font-weight:500; color:var(--muted); cursor:pointer;
 }
-.segmented-control label.selected { background:var(--surface-green); color:var(--green); font-weight:650; }
+.activity-picker .segmented-control label { border:1px solid transparent; }
+.activity-picker .segmented-control label.selected {
+  background:var(--button-background); color:var(--button-ink); font-weight:650;
+  border-color:var(--button-background); box-shadow:inset 0 0 0 2px var(--button-ink);
+}
 .segmented-control input { position:absolute; opacity:0; width:1px; height:1px; }
 .segmented-control label:has(input:focus-visible) { outline:3px solid var(--focus); outline-offset:2px; }
 
