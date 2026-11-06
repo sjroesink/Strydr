@@ -25,9 +25,10 @@ test('real production worker: install identity, public-only cache, warm offline 
   expect(workerResponse.headers()['cache-control']).toBe('no-cache');
   expect(workerResponse.headers()['content-type']).toContain('javascript');
   expect((await page.request.get('/manifest.webmanifest')).headers()['content-type']).toContain('application/manifest+json');
-  // Playwright's isolated context is incognito: that's an environment restriction,
-  // not a manifest/SW failure. A persistent-context probe checks installability separately.
-  expect((await client.send('Page.getInstallabilityErrors')).installabilityErrors.map(error => error.errorId)).toEqual(['in-incognito']);
+  // Chromium versions differ on whether isolated contexts report the incognito restriction.
+  // Neither a valid PWA nor this environment-only restriction is an installation defect.
+  // Keep rejecting every actual manifest/SW error; the persistent-context probe requires zero errors.
+  expect((await client.send('Page.getInstallabilityErrors')).installabilityErrors.filter(error => error.errorId !== 'in-incognito')).toEqual([]);
   await page.evaluate(async () => {
     await fetch('/api/connections');
     await fetch('/api/searches/00000000-0000-0000-0000-000000000001');
@@ -43,7 +44,12 @@ test('real production worker: install identity, public-only cache, warm offline 
   expect(cachePaths.every(path => /^\/(?:assets\/|icons\/|index\.html$|manifest\.webmanifest$|favicon\.svg$|apple-touch-icon\.png$)/.test(path))).toBe(true);
   await page.getByRole('button', { name: 'NL', exact: true }).click();
   await context.setOffline(true);
+  // Current Chromium separates request emulation from navigator state. Use its native
+  // protocol override as well; the real blocked fetch below still proves network loss.
+  await client.send('Network.overrideNetworkState', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  expect(await page.evaluate(() => navigator.onLine)).toBe(false);
   await page.reload();
+  expect(await page.evaluate(() => navigator.onLine)).toBe(false);
   await expect(page.getByRole('heading', { name: 'Waar begin je?' })).toBeVisible();
   await expect(page.locator('.pwa-status [role="status"]')).toContainText('Je bent offline');
   await expect(page.getByRole('combobox').first()).toBeDisabled();
@@ -54,6 +60,7 @@ test('real production worker: install identity, public-only cache, warm offline 
   await expect(page.locator('.pwa-status [role="status"]')).toContainText('Je bent offline');
   await expect(page.getByRole('heading', { name: 'Waar begin je?' })).toBeVisible();
   await context.setOffline(false);
+  await client.send('Network.overrideNetworkState', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   await expect(page.locator('.pwa-status [role="status"]')).toHaveCount(0);
 });
 

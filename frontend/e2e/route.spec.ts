@@ -63,6 +63,8 @@ test('draw a fixed section with map clicks, export it, and complete it into a lo
   // Releasing a marker must move that point, without creating a new click point.
   const originalPoints = previewResponse.request().postDataJSON().points;
   const firstMarker = page.locator('.map-via-marker').first();
+  // Wait for a stable, hittable marker before starting the native mouse drag.
+  await firstMarker.hover();
   const markerBox = await firstMarker.boundingBox();
   if (!markerBox) throw new Error('Drawn point is not visible');
   const dragDiagnostics = await firstMarker.evaluate(element => {
