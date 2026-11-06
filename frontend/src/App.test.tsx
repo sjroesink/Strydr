@@ -52,6 +52,55 @@ async function search() { await userEvent.click(screen.getByRole('button', { nam
 async function startDrawing() { await userEvent.click(screen.getByRole('checkbox', { name: 'Pass through a spot' })); }
 const greenCard = () => screen.getByRole('checkbox', { name: /Green surroundings/ });
 
+it('keeps language, theme and native installation inside one keyboard-accessible options disclosure', async () => {
+  render(<App />);
+  const prompt = vi.fn().mockResolvedValue(undefined);
+  fireEvent(window, Object.assign(new Event('beforeinstallprompt', { cancelable: true }), {
+    prompt, userChoice: Promise.resolve({ outcome: 'dismissed' }),
+  }));
+  const toggle = screen.getByRole('button', { name: 'Meander options' });
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('button', { name: 'NL' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Install Meander' })).not.toBeInTheDocument();
+  await userEvent.click(toggle);
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByRole('group', { name: 'Language' })).toBeVisible();
+  expect(screen.getByRole('group', { name: 'Appearance' })).toBeVisible();
+  await userEvent.click(screen.getByRole('button', { name: 'Dark theme' }));
+  expect(localStorage.getItem('meander.theme')).toBe('dark');
+  await userEvent.click(screen.getByRole('button', { name: 'NL' }));
+  expect(screen.getByRole('button', { name: 'Meander instellingen' })).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByRole('button', { name: 'Donker thema' })).toHaveAttribute('aria-pressed', 'true');
+  await userEvent.keyboard('{Escape}');
+  expect(toggle).toHaveFocus();
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await userEvent.click(toggle);
+  await userEvent.click(screen.getByRole('button', { name: 'Meander installeren' }));
+  expect(prompt).toHaveBeenCalledOnce();
+  await userEvent.click(screen.getByRole('heading', { name: 'Waar begin je?' }));
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  localStorage.removeItem('meander.theme');
+});
+
+it('steps the start picker down like the endpoint picker and restores the planner on pick or cancel', async () => {
+  render(<App />); await chooseStart();
+  const previous = (screen.getByRole('combobox') as HTMLInputElement).value;
+  await userEvent.click(screen.getByRole('button', { name: 'Pick on map' }));
+  expect(screen.getByRole('button', { name: 'Cancel start selection' })).toHaveFocus();
+  expect(screen.queryByRole('button', { name: /Next: distance/ })).not.toBeInTheDocument();
+  fireEvent.submit(screen.getByRole('form', { name: 'Plan a route' }));
+  expect(screen.queryByRole('heading', { name: 'How far?' })).not.toBeInTheDocument();
+  expect(generate).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel start selection' }));
+  expect(screen.getByRole('combobox')).toHaveValue(previous);
+  expect(screen.getByRole('button', { name: 'Pick on map' })).toHaveFocus();
+  await userEvent.click(screen.getByRole('button', { name: 'Pick on map' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Set start fixture' }));
+  expect(screen.queryByRole('button', { name: 'Cancel start selection' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Next: distance/ })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Pick on map' })).toHaveFocus();
+});
+
 it('uses real route-shape checkboxes and clears unchecked endpoint/via constraints from requests', async () => {
   vi.mocked(generate).mockResolvedValue([candidate()]);
   render(<App />); await chooseStart(); await toPreferences();
@@ -722,6 +771,7 @@ it('follows a Dutch browser and switches to English with the toggle', async () =
     render(<App />);
     expect(await screen.findByRole('heading', { name: 'Waar begin je?' })).toBeInTheDocument();
     expect(document.documentElement.lang).toBe('nl');
+    fireEvent.click(screen.getByRole('button', { name: 'Meander instellingen' }));
     expect(screen.getByRole('button', { name: 'NL' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'EN' }));
     expect(screen.getByRole('button', { name: 'EN' })).toHaveAttribute('aria-pressed', 'true');

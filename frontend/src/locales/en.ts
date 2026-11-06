@@ -1,5 +1,7 @@
 // Source dictionary. Every key here must also exist in nl.ts (enforced by its type).
 export const en = {
+  'settings.title': 'Meander options',
+  'start.cancelPick': 'Cancel start selection',
   'pwa.title': 'Meander app',
   'pwa.install': 'Install Meander',
   'pwa.offline': 'You are offline. Meander can open, but maps, location search, saved routes, route planning and Garmin need internet. Routes are not stored offline.',

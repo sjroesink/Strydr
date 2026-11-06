@@ -1,6 +1,8 @@
 import type { en } from './en';
 
 export const nl: Record<keyof typeof en, string> = {
+  'settings.title': 'Meander instellingen',
+  'start.cancelPick': 'Start kiezen annuleren',
   'pwa.title': 'Meander-app',
   'pwa.install': 'Meander installeren',
   'pwa.offline': 'Je bent offline. Meander opent wel, maar kaarten, locaties zoeken, opgeslagen routes, routes plannen en Garmin hebben internet nodig. Routes worden niet offline bewaard.',

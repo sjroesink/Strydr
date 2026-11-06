@@ -12,6 +12,8 @@ import { Icon, type IconName } from './components/Icon';
 import { useTheme, type ThemePreference } from './useTheme';
 import { I18nProvider, useI18n, type Message, type MessageKey } from './i18n';
 import { PwaStatus } from './PwaStatus';
+import { PwaInstallProvider } from './PwaInstall';
+import { SettingsMenu } from './components/SettingsMenu';
 import { useOnline } from './pwa';
 import { MessageError, failureMessages, warningMessage } from './apiText';
 
@@ -147,6 +149,9 @@ function Planner() {
   const { preference: themePreference, colorScheme, changePreference } = useTheme();
   const [step, setStep] = useState<Step>('start');
   const [sheetCollapsed, setSheetCollapsed] = useState(false);
+  const [startPickActive, setStartPickActive] = useState(false);
+  const startPickButton = useRef<HTMLButtonElement>(null);
+  const wasPickingStart = useRef(false);
   const endPickButton = useRef<HTMLButtonElement>(null);
   const endPickCancel = useRef<HTMLButtonElement>(null);
   const wasPickingEnd = useRef(false);
@@ -219,12 +224,16 @@ function Planner() {
   const view: Step | 'edit' = isEditingRoute ? 'edit'
     : step === 'routes' && phase === 'idle' && candidates.length === 0 ? 'preferences' : step;
   const pickingEnd = view === 'preferences' && mode === 'end' && hasEnd;
-  const padding = useMapPadding([view, sheetCollapsed, mode === 'browse', pickingEnd]);
+  const pickingStart = view === 'start' && mode === 'start' && startPickActive;
+  const pickingMap = pickingStart || pickingEnd;
+  const padding = useMapPadding([view, sheetCollapsed, mode === 'browse', pickingMap]);
   useEffect(() => {
-    if (pickingEnd) endPickCancel.current?.focus({ preventScroll: true });
+    if (pickingMap) endPickCancel.current?.focus({ preventScroll: true });
+    else if (wasPickingStart.current) startPickButton.current?.focus({ preventScroll: true });
     else if (wasPickingEnd.current) endPickButton.current?.focus({ preventScroll: true });
+    wasPickingStart.current = pickingStart;
     wasPickingEnd.current = pickingEnd;
-  }, [pickingEnd]);
+  }, [pickingStart, pickingEnd, pickingMap]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -344,7 +353,7 @@ function Planner() {
     setError([]); setNotice(null); setLocating(false); setExporting(null);
   }
   function goTo(next: Step) {
-    setError([]); setSheetCollapsed(false); setStep(next);
+    setError([]); setSheetCollapsed(false); setStartPickActive(false); setStep(next);
     setMode(current => next === 'start' && !start ? 'start' : current === 'start' || current === 'end' || next !== 'preferences' && current === 'draw' ? 'browse' : current);
     setTimeout(() => (next === 'routes' ? resultsHeading : stepHeading).current?.focus({ preventScroll: true }), 0);
   }
@@ -378,7 +387,7 @@ function Planner() {
     if (mode === 'draw' && which === 'start' && !start) rememberDrawing();
     else resetDrawingHistory();
     invalidate();
-    if (which === 'start') { setStart(place); setStartText(place.label); }
+    if (which === 'start') { setStart(place); setStartText(place.label); setStartPickActive(false); setSheetCollapsed(false); }
     else { setEnd(place); setEndText(place.label); setSheetCollapsed(false); }
     if (mode !== 'draw') setMode('browse');
   }
@@ -471,7 +480,11 @@ function Planner() {
     setMode('end');
     if (!window.matchMedia?.('(min-width: 760px)').matches) setSheetCollapsed(true);
   }
-  function cancelEndPick() { setMode('browse'); setSheetCollapsed(false); }
+  function beginStartPick() {
+    setStartPickActive(true); setMode('start');
+    if (!window.matchMedia?.('(min-width: 760px)').matches) setSheetCollapsed(true);
+  }
+  function cancelMapPick() { setMode('browse'); setStartPickActive(false); setSheetCollapsed(false); }
   function locate() {
     resetDrawingHistory();
     invalidate();
@@ -491,7 +504,7 @@ function Planner() {
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (pickingEnd) return;
+    if (pickingMap) return;
     // Enter on an earlier question moves on instead of searching.
     if (view === 'start' || view === 'distance') { next(); return; }
     setError([]); setNotice(null);
@@ -720,7 +733,7 @@ function Planner() {
         onTextChange={value => { resetDrawingHistory(); invalidate(); setStart(null); setStartText(value); }} onPick={place => pick('start', place)} />
       <div className="chip-row">
         <button type="button" className="chip-button" onClick={locate} disabled={locating}><Icon name="locate" />{locating ? t('start.locating') : t('start.useLocation')}</button>
-        <button type="button" className="chip-button" aria-pressed={mode === 'start'} onClick={() => setMode(current => current === 'start' ? 'browse' : 'start')}>
+        <button ref={startPickButton} type="button" className="chip-button" aria-pressed={pickingStart} onClick={beginStartPick}>
           <Icon name="pin" />{t('start.pickOnMap')}</button>
       </div>
     </>;
@@ -932,15 +945,15 @@ function Planner() {
   return <div className={`app-shell step-${view} ${sheetCollapsed ? 'sheet-collapsed' : ''} ${mode === 'draw' ? 'is-drawing' : ''}`}
     style={{ '--inset-top': `${padding.top}px`, '--inset-bottom': `${padding.bottom}px`, '--inset-left': `${padding.left}px` } as React.CSSProperties}>
     {routeMap}
-    <header className="top-bar" data-map-overlay="topbar">{brand}<div className="top-controls">{languagePicker}{themePicker}</div></header>
-    <aside className="planner-sheet" aria-label={t('sheet.planner')} data-map-overlay="sheet" {...(pickingEnd ? {} : sheetSwipe)}>
-      <button type="button" className="sheet-grabber" disabled={pickingEnd} aria-expanded={!sheetCollapsed}
+    <header className="top-bar" data-map-overlay="topbar">{brand}<SettingsMenu languagePicker={languagePicker} themePicker={themePicker} /></header>
+    <aside className="planner-sheet" aria-label={t('sheet.planner')} data-map-overlay="sheet" {...(pickingMap ? {} : sheetSwipe)}>
+      <button type="button" className="sheet-grabber" disabled={pickingMap} aria-expanded={!sheetCollapsed}
         aria-label={sheetCollapsed ? t('sheet.show') : t('sheet.more')} onClick={() => setSheetCollapsed(value => !value)}><span /></button>
       <div className="sheet-body">
         {view === 'routes' ? renderRoutes() : <form className="wizard-step" onSubmit={event => void submit(event)} noValidate aria-label={t('wizard.form')}>
-          {pickingEnd ? <div className="endpoint-picker">
-            <p role="status">{t('map.tapToFinish')}</p>
-            <button ref={endPickCancel} type="button" className="chip-button" onClick={cancelEndPick}>{t('end.cancelPick')}</button>
+          {pickingMap ? <div className="endpoint-picker">
+            <p role="status">{t(pickingStart ? 'map.tapToStart' : 'map.tapToFinish')}</p>
+            <button ref={endPickCancel} type="button" className="chip-button" onClick={cancelMapPick}>{t(pickingStart ? 'start.cancelPick' : 'end.cancelPick')}</button>
           </div> : <>
           {renderQuestion()}
           {alerts}
@@ -957,12 +970,12 @@ function Planner() {
           </div>
           </>}
         </form>}
-        {!pickingEnd && providerCredit}
+        {!pickingMap && providerCredit}
       </div>
     </aside>
   </div>;
 }
 
 export default function App() {
-  return <I18nProvider><Planner /><PwaStatus /></I18nProvider>;
+  return <I18nProvider><PwaInstallProvider><Planner /><PwaStatus /></PwaInstallProvider></I18nProvider>;
 }

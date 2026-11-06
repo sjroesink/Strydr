@@ -18,7 +18,9 @@ for (const theme of ['light', 'dark']) {
       await page.goto('/');
       await page.locator('.activity-picker').waitFor();
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+      await page.getByRole('button', { name: /Meander options|Meander instellingen/ }).click();
       await page.getByRole('button', { name: language, exact: true }).click();
+      await page.keyboard.press('Escape');
       for (const activity of ['running', 'walking', 'cycling']) {
         const radio = page.locator(`input[name="activity"][value="${activity}"]`);
         const label = radio.locator('..');

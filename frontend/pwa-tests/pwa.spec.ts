@@ -42,6 +42,7 @@ test('real production worker: install identity, public-only cache, warm offline 
   expect(cachePaths).toContain('/index.html');
   expect(cachePaths.some(path => /^\/(api|map|routes)\//.test(path))).toBe(false);
   expect(cachePaths.every(path => /^\/(?:assets\/|icons\/|index\.html$|manifest\.webmanifest$|favicon\.svg$|apple-touch-icon\.png$)/.test(path))).toBe(true);
+  await page.getByRole('button', { name: /Meander options|Meander instellingen/ }).click();
   await page.getByRole('button', { name: 'NL', exact: true }).click();
   await context.setOffline(true);
   // Current Chromium separates request emulation from navigator state. Use its native
@@ -53,7 +54,9 @@ test('real production worker: install identity, public-only cache, warm offline 
   await expect(page.getByRole('heading', { name: 'Waar begin je?' })).toBeVisible();
   await expect(page.locator('.pwa-status [role="status"]')).toContainText('Je bent offline');
   await expect(page.getByRole('combobox').first()).toBeDisabled();
+  await page.getByRole('button', { name: 'Meander instellingen' }).click();
   await expect(page.getByRole('button', { name: 'NL', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
   expect(await page.evaluate(() => fetch('/api/connections').then(() => false, () => true))).toBe(true);
   await page.screenshot({ path: info.outputPath('offline-shell.png'), fullPage: true });
   await page.goto('/routes/00000000-0000-0000-0000-000000000001?route=private');
@@ -86,7 +89,9 @@ test('normal persistent browser passes installability checks without claiming an
 test('waiting updates never force reload; explicit consent updates only the initiating tab', async ({ page, context }) => {
   await controlled(page);
   const other = await context.newPage(); await other.goto('/'); await page.bringToFront();
+  await page.getByRole('button', { name: /Meander options|Meander instellingen/ }).click();
   await page.getByRole('button', { name: 'EN', exact: true }).click();
+  await page.keyboard.press('Escape');
   let navigations = 0; let otherNavigations = 0;
   page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigations++; });
   other.on('framenavigated', frame => { if (frame === other.mainFrame()) otherNavigations++; });

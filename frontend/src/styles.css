@@ -97,7 +97,18 @@ button svg { flex-shrink:0; }
 .theme-picker button[aria-pressed="true"], .language-picker button[aria-pressed="true"] { background:var(--surface-green); color:var(--green); }
 .theme-picker button:hover, .language-picker button:hover { color:var(--ink); }
 .theme-picker .icon { width:17px; height:17px; }
-.top-controls { display:flex; gap:8px; align-items:center; }
+.settings-menu { position:relative; }
+.settings-toggle { width:44px; height:44px; font-size:28px; line-height:1; }
+.settings-panel { position:absolute; top:calc(100% + 8px); right:0; width:min(280px, calc(100vw - 24px)); max-height:calc(100dvh - 92px - env(safe-area-inset-top)); overflow:auto; display:grid; gap:18px; padding:20px; border:1px solid var(--line); border-radius:20px; background:var(--surface); color:var(--ink); box-shadow:var(--shadow); }
+.settings-panel[hidden] { display:none; }
+.settings-section { display:grid; gap:8px; }
+.settings-section h2 { margin:0; font-size:13px; font-weight:650; color:var(--muted); }
+.settings-panel .theme-picker, .settings-panel .language-picker { width:max-content; box-shadow:none; }
+.settings-panel .theme-picker button, .settings-panel .language-picker button { min-width:44px; height:44px; }
+.settings-install { width:100%; min-height:44px; }
+.settings-panel .pwa-ios { font-size:14px; line-height:1.5; }
+.settings-panel .pwa-ios summary { min-height:44px; display:flex; align-items:center; }
+.top-bar:has(.settings-panel:not([hidden])) { z-index:45; }
 .language-picker button { width:auto; min-width:36px; padding:0 8px; font-size:13px; font-weight:650; }
 
 /* Planner sheet: a bottom sheet on phones, a floating panel on wide screens. */

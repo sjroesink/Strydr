@@ -10,6 +10,7 @@ test('follows system appearance, persists overrides and omits decorative text', 
   await expect(page.locator('html')).toHaveCSS('background-color', 'rgb(24, 24, 24)');
   await expect(page.locator('body')).toHaveCSS('color', 'rgb(239, 238, 235)');
   await expect(page.locator('.brand')).toHaveCSS('color', 'rgb(236, 155, 99)');
+  await page.getByRole('button', { name: 'Meander options' }).click();
   await expect(page.getByRole('button', { name: 'System theme' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('radio', { name: 'Run' })).toBeChecked();
   await expect(page.locator('.segmented-control svg')).toHaveCount(3);
@@ -22,6 +23,7 @@ test('follows system appearance, persists overrides and omits decorative text', 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.getByRole('button', { name: 'Meander options' }).click();
   await expect(page.getByRole('button', { name: 'Light theme' })).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'System theme' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');

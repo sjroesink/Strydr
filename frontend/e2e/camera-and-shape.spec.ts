@@ -22,7 +22,9 @@ function contrast(a: string, b: string) {
 for (const language of ['NL', 'EN']) for (const theme of ['light', 'dark']) {
   test(`${language} ${theme}: native shape cards and endpoint picker expose the map without a search action`, async ({ page }, info) => {
     await fixture(page); await page.goto('/routes/camera-shape');
+    await page.getByRole('button', { name: /Meander options|Meander instellingen/ }).click();
     await page.getByRole('button', { name: language, exact: true }).click();
+    await page.keyboard.press('Escape');
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     await page.getByRole('button', { name: language === 'NL' ? 'Voorkeuren wijzigen' : 'Change preferences', exact: true }).click();
     await expect(page.locator('.step-title')).toBeFocused();
@@ -90,6 +92,7 @@ test('actual MapLibre fits each selected route completely beside the sheet, with
   }
   await page.evaluate(() => { (window as any).__camera.panBy([30, 20], { duration: 0 }); });
   const fits = await page.evaluate(() => (window as any).__cameraFits.length);
+  await page.getByRole('button', { name: 'Meander options' }).click();
   await page.getByRole('button', { name: 'Dark theme', exact: true }).click();
   expect(await page.evaluate(() => (window as any).__cameraFits.length)).toBe(fits);
 });

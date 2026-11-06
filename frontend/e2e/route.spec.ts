@@ -167,6 +167,7 @@ test('choose a start, generate and inspect routes, and export GPX', async ({ pag
   await second.click();
   await expect(second).toHaveAttribute('aria-pressed', 'true');
   const darkMapPending = page.waitForResponse(response => new URL(response.url()).pathname === '/style-dark.json');
+  await page.getByRole('button', { name: 'Meander options' }).click();
   await page.getByRole('button', { name: 'Dark theme' }).click();
   await darkMapPending;
   await expect(second).toHaveAttribute('aria-pressed', 'true');
@@ -174,6 +175,7 @@ test('choose a start, generate and inspect routes, and export GPX', async ({ pag
   await page.waitForTimeout(500);
   await page.screenshot({ path: testInfo.outputPath('meander-routes-dark.png'), fullPage: true });
   await page.getByRole('button', { name: 'Light theme' }).click();
+  await page.keyboard.press('Escape');
   await expect(page.locator('.map-marker')).toHaveCount(1);
   await expect(page.getByText('Map unavailable', { exact: true })).toHaveCount(0);
   await expect(page.locator('.maplibregl-canvas')).toBeVisible();
@@ -313,6 +315,7 @@ test.describe('Dutch browser', () => {
     await page.getByRole('checkbox', { name: /Groene omgeving/ }).check();
     await page.getByRole('button', { name: 'Vind mijn routes' }).click();
     await expect(page.getByText(/% natuur/).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Meander instellingen' }).click();
     await page.getByRole('button', { name: 'EN', exact: true }).click();
     await expect(page.getByText(/% nature/).first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'EN', exact: true })).toHaveAttribute('aria-pressed', 'true');

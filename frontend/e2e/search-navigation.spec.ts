@@ -23,6 +23,7 @@ for (const language of ['NL', 'EN']) {
     });
     await page.goto('/routes/navigation-fixture');
     await expect(page.locator('.route-card')).toHaveCount(3);
+    await page.getByRole('button', { name: /Meander options|Meander instellingen/ }).click();
     await page.getByRole('button', { name: language, exact: true }).click();
     await page.reload();
     const adjust = page.getByRole('button', { name: language === 'NL' ? 'Start wijzigen' : 'Change start', exact: true });

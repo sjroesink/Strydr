@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { I18nProvider } from './i18n';
 import { PwaStatus } from './PwaStatus';
+import { PwaInstall, PwaInstallProvider } from './PwaInstall';
 import { registerShell, activateUpdate } from './pwa';
 
 it('shows an honest offline notice in both languages and removes it on reconnect', () => {
@@ -19,7 +20,7 @@ it('shows an honest offline notice in both languages and removes it on reconnect
 });
 
 it('only offers native installation after a supported event and hides it once installed', async () => {
-  render(<I18nProvider><PwaStatus /></I18nProvider>);
+  render(<I18nProvider><PwaInstallProvider><PwaInstall /></PwaInstallProvider></I18nProvider>);
   expect(screen.queryByRole('button', { name: 'Install Meander' })).not.toBeInTheDocument();
   const prompt = vi.fn().mockResolvedValue(undefined);
   const event = Object.assign(new Event('beforeinstallprompt', { cancelable: true }), { prompt, userChoice: Promise.resolve({ outcome: 'accepted' }) });
@@ -31,13 +32,24 @@ it('only offers native installation after a supported event and hides it once in
   expect(screen.queryByRole('button', { name: 'Install Meander' })).not.toBeInTheDocument();
 });
 
+it('retains a deferred browser install offer while the options UI is unmounted for route editing', async () => {
+  const { rerender } = render(<I18nProvider><PwaInstallProvider><span>Editor</span></PwaInstallProvider></I18nProvider>);
+  const prompt = vi.fn().mockResolvedValue(undefined);
+  fireEvent(window, Object.assign(new Event('beforeinstallprompt', { cancelable: true }), {
+    prompt, userChoice: Promise.resolve({ outcome: 'dismissed' }),
+  }));
+  rerender(<I18nProvider><PwaInstallProvider><PwaInstall /></PwaInstallProvider></I18nProvider>);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Install Meander' })); });
+  expect(prompt).toHaveBeenCalledOnce();
+});
+
 it('offers manual iOS instructions, but no native install button or advice in standalone mode', () => {
   vi.stubGlobal('navigator', { userAgent: 'iPhone', standalone: false, onLine: true });
-  const { unmount } = render(<I18nProvider><PwaStatus /></I18nProvider>);
+  const { unmount } = render(<I18nProvider><PwaInstallProvider><PwaInstall /></PwaInstallProvider></I18nProvider>);
   expect(screen.getByText(/Share → Add to Home Screen/)).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Install Meander' })).not.toBeInTheDocument();
   unmount(); vi.stubGlobal('navigator', { userAgent: 'iPhone', standalone: true, onLine: true });
-  render(<I18nProvider><PwaStatus /></I18nProvider>);
+  render(<I18nProvider><PwaInstallProvider><PwaInstall /></PwaInstallProvider></I18nProvider>);
   expect(screen.queryByText(/Share → Add to Home Screen/)).not.toBeInTheDocument();
 });
 

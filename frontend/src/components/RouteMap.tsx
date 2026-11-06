@@ -332,7 +332,7 @@ export default function RouteMap(props: Props) {
     } else if (props.start) mapRef.current.easeTo({ center: [props.start.longitude, props.start.latitude], zoom: 13, duration: 600 });
   }, [props.candidates, props.start, props.preview, props.mode, props.fitRequest, ready]);
 
-  return <section className="map-panel" aria-label={t('map.label')}>
+  return <section className="map-panel" aria-label={t('map.label')} aria-busy={configured && !ready && !error}>
     <div ref={container} className="map-canvas" data-testid="route-map" />
     {props.mode !== 'browse' && <div className="map-instruction">{props.mode === 'draw'
       ? props.start ? t('map.tapToAdd') : t('map.tapToStart')
