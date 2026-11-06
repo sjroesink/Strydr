@@ -22,7 +22,7 @@ test('real production worker: install identity, public-only cache, warm offline 
     expect(dimensions).toEqual(icon.sizes.split('x').map(Number));
   }
   const workerResponse = await page.request.get('/sw.js');
-  expect(workerResponse.headers()['cache-control']).toBe('no-cache');
+  expect(workerResponse.headers()['cache-control']).toBe('no-cache, no-store');
   expect(workerResponse.headers()['content-type']).toContain('javascript');
   expect((await page.request.get('/manifest.webmanifest')).headers()['content-type']).toContain('application/manifest+json');
   // Chromium versions differ on whether isolated contexts report the incognito restriction.

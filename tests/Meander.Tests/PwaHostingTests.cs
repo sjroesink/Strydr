@@ -29,6 +29,9 @@ public sealed class PwaHostingTests
             using var worker = await client.GetAsync("/sw.js");
             Assert.Contains("javascript", worker.Content.Headers.ContentType!.MediaType!);
             Assert.Equal("/", worker.Headers.GetValues("Service-Worker-Allowed").Single());
+            // CDN/browser TTLs must not turn the update entrypoint into a fresh cached script.
+            Assert.True(worker.Headers.CacheControl?.NoStore);
+            Assert.Equal("no-store", worker.Headers.GetValues("Cloudflare-CDN-Cache-Control").Single());
             foreach (var path in new[] { "/unknown-page", "/api/missing", "/map/missing", "/missing.js" })
             {
                 using var response = await client.GetAsync(path);

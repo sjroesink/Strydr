@@ -191,7 +191,13 @@ var shellFiles = new StaticFileOptions
         var path = context.Context.Request.Path;
         if (path == "/sw.js" || path == "/index.html" || path == "/manifest.webmanifest")
             context.Context.Response.Headers.CacheControl = "no-cache";
-        if (path == "/sw.js") context.Context.Response.Headers["Service-Worker-Allowed"] = "/";
+        if (path == "/sw.js")
+        {
+            // Keep the update entrypoint out of browser/CDN freshness caches.
+            context.Context.Response.Headers.CacheControl = "no-cache, no-store";
+            context.Context.Response.Headers["Cloudflare-CDN-Cache-Control"] = "no-store";
+            context.Context.Response.Headers["Service-Worker-Allowed"] = "/";
+        }
     }
 };
 if (hasWebRoot)
